@@ -1,0 +1,264 @@
+import warnings
+
+import numpy as np
+import pandas as pd
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+import pmdarima as pm
+
+from app.utils.logger import get_logger, log_stage
+
+logger = get_logger("modeling")
+
+ETS_TREND_OPTIONS = ["add", "mul", None]
+ETS_SEASONAL_OPTIONS = ["add", "mul", None]
+
+
+def run_models(
+    df: pd.DataFrame,
+    freq: str,
+    seasonal_period: int | None,
+    forecast_horizon: int,
+    file_hash: str = "",
+) -> dict:
+    with log_stage(logger, "modeling", file_hash=file_hash, row_count=len(df)):
+        y = df["y"].values
+        dates = df["ds"].values
+
+        # Run cross-validation and final fit for both models
+        n_windows = min(5, len(y) // 3)
+        n_windows = max(1, n_windows)
+
+        ets_cv, ets_forecast, ets_conf = _fit_auto_ets(
+            y, seasonal_period, forecast_horizon, n_windows
+        )
+        arima_cv, arima_forecast, arima_conf = _fit_auto_sarima(
+            y, seasonal_period, forecast_horizon, n_windows
+        )
+
+        # Build forecast DataFrame
+        last_date = pd.Timestamp(dates[-1])
+        forecast_dates = pd.date_range(
+            start=last_date, periods=forecast_horizon + 1, freq=freq
+        )[1:]
+
+        forecasts = pd.DataFrame({
+            "ds": forecast_dates,
+            "AutoETS": ets_forecast,
+            "AutoETS-lo-80": ets_conf[0],
+            "AutoETS-hi-80": ets_conf[1],
+            "AutoARIMA": arima_forecast,
+            "AutoARIMA-lo-80": arima_conf[0],
+            "AutoARIMA-hi-80": arima_conf[1],
+        })
+
+        # Build CV results DataFrame
+        cv_results = _build_cv_results(ets_cv, arima_cv)
+
+        logger.info(
+            f"Models fitted. Forecast horizon: {forecast_horizon}, CV windows: {n_windows}",
+            extra={"file_hash": file_hash},
+        )
+
+        return {
+            "forecasts": forecasts,
+            "cv_results": cv_results,
+        }
+
+
+def _fit_auto_ets(
+    y: np.ndarray,
+    seasonal_period: int | None,
+    horizon: int,
+    n_windows: int,
+) -> tuple:
+    best_model = None
+    best_aic = float("inf")
+
+    sp = seasonal_period if seasonal_period and seasonal_period > 1 else None
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+
+        for trend in ETS_TREND_OPTIONS:
+            seasonal_options = ETS_SEASONAL_OPTIONS if sp else [None]
+            for seasonal in seasonal_options:
+                try:
+                    model = ExponentialSmoothing(
+                        y,
+                        trend=trend,
+                        seasonal=seasonal,
+                        seasonal_periods=sp,
+                        initialization_method="estimated",
+                    ).fit(optimized=True, use_brute=False)
+
+                    if model.aic < best_aic:
+                        best_aic = model.aic
+                        best_model = (trend, seasonal)
+                except Exception:
+                    continue
+
+    # Cross-validation
+    cv_results = _rolling_cv_ets(y, best_model, sp, horizon, n_windows)
+
+    # Final forecast
+    trend, seasonal = best_model if best_model else (None, None)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        final_model = ExponentialSmoothing(
+            y, trend=trend, seasonal=seasonal,
+            seasonal_periods=sp, initialization_method="estimated",
+        ).fit(optimized=True, use_brute=False)
+
+    forecast = final_model.forecast(horizon)
+    # Expanding confidence intervals: wider as horizon increases
+    residual_std = np.std(final_model.resid)
+    steps = np.arange(1, horizon + 1)
+    widths = 1.28 * residual_std * np.sqrt(steps)  # 80% CI, grows with sqrt(h)
+    ci_lo = forecast - widths
+    ci_hi = forecast + widths
+
+    return cv_results, forecast, (ci_lo, ci_hi)
+
+
+def _fit_auto_sarima(
+    y: np.ndarray,
+    seasonal_period: int | None,
+    horizon: int,
+    n_windows: int,
+) -> tuple:
+    seasonal = seasonal_period is not None and seasonal_period > 1
+    m = seasonal_period if seasonal else 1
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        arima_model = pm.auto_arima(
+            y,
+            seasonal=seasonal,
+            m=m,
+            max_p=3,
+            max_q=3,
+            max_P=1,
+            max_Q=1,
+            max_d=2,
+            max_D=1,
+            stepwise=True,
+            suppress_warnings=True,
+            error_action="ignore",
+        )
+
+    # Cross-validation
+    order = arima_model.order
+    seasonal_order = arima_model.seasonal_order
+    cv_results = _rolling_cv_sarima(y, order, seasonal_order, horizon, n_windows)
+
+    # Final forecast with confidence intervals
+    forecast, conf_int = arima_model.predict(n_periods=horizon, return_conf_int=True, alpha=0.20)
+    ci_lo = conf_int[:, 0]
+    ci_hi = conf_int[:, 1]
+
+    return cv_results, forecast, (ci_lo, ci_hi)
+
+
+def _rolling_cv_ets(
+    y: np.ndarray,
+    model_params: tuple | None,
+    sp: int | None,
+    horizon: int,
+    n_windows: int,
+) -> list[dict]:
+    results = []
+    n = len(y)
+    step = max(1, horizon)
+    trend, seasonal = model_params if model_params else (None, None)
+
+    for i in range(n_windows):
+        test_end = n - i * step
+        test_start = test_end - horizon
+        if test_start < horizon:
+            break
+
+        train = y[:test_start]
+        actual = y[test_start:test_end]
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                model = ExponentialSmoothing(
+                    train, trend=trend, seasonal=seasonal,
+                    seasonal_periods=sp, initialization_method="estimated",
+                ).fit(optimized=True, use_brute=False)
+                pred = model.forecast(horizon)
+            except Exception:
+                pred = np.full(horizon, np.mean(train))
+
+        for j in range(len(actual)):
+            results.append({"y": actual[j], "AutoETS": pred[j]})
+
+    return results
+
+
+def _rolling_cv_sarima(
+    y: np.ndarray,
+    order: tuple,
+    seasonal_order: tuple,
+    horizon: int,
+    n_windows: int,
+) -> list[dict]:
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+    results = []
+    n = len(y)
+    step = max(1, horizon)
+
+    for i in range(n_windows):
+        test_end = n - i * step
+        test_start = test_end - horizon
+        if test_start < horizon:
+            break
+
+        train = y[:test_start]
+        actual = y[test_start:test_end]
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            try:
+                model = SARIMAX(
+                    train, order=order, seasonal_order=seasonal_order,
+                    enforce_stationarity=False, enforce_invertibility=False,
+                ).fit(disp=False, maxiter=50)
+                pred = model.forecast(horizon)
+            except Exception:
+                pred = np.full(horizon, np.mean(train))
+
+        for j in range(len(actual)):
+            results.append({"y": actual[j], "AutoARIMA": pred[j]})
+
+    return results
+
+
+def _build_cv_results(ets_cv: list[dict], arima_cv: list[dict]) -> pd.DataFrame:
+    # Merge CV results - they may have different lengths
+    max_len = max(len(ets_cv), len(arima_cv))
+
+    y_vals = []
+    ets_preds = []
+    arima_preds = []
+
+    for i in range(max_len):
+        if i < len(ets_cv):
+            y_vals.append(ets_cv[i]["y"])
+            ets_preds.append(ets_cv[i]["AutoETS"])
+        else:
+            y_vals.append(arima_cv[i]["y"])
+            ets_preds.append(np.nan)
+
+        if i < len(arima_cv):
+            arima_preds.append(arima_cv[i]["AutoARIMA"])
+        else:
+            arima_preds.append(np.nan)
+
+    return pd.DataFrame({
+        "y": y_vals,
+        "AutoETS": ets_preds,
+        "AutoARIMA": arima_preds,
+    })
