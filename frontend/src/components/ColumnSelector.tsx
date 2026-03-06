@@ -84,7 +84,7 @@ export default function ColumnSelector({
                   : "border-white/20 bg-black hover:border-white/40"
               }`}
             >
-              <p className="font-medium text-sm">Avoids Overestimation</p>
+              <p className="font-medium text-sm">Avoids Overestimation (Under-forecast)</p>
             </button>
             <button
               type="button"
@@ -95,7 +95,7 @@ export default function ColumnSelector({
                   : "border-white/20 bg-black hover:border-white/40"
               }`}
             >
-              <p className="font-medium text-sm">Avoids Stockouts</p>
+              <p className="font-medium text-sm">Avoids Stockouts (Over-forecast)</p>
             </button>
           </div>
         </div>
