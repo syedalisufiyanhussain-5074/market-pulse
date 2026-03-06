@@ -13,7 +13,7 @@ FREQUENCY_MAP = {
 }
 
 MIN_PERIODS_FOR_SEASONALITY = 24
-MAX_ROWS_FOR_MODELING = 500
+MAX_ROWS_FOR_MODELING = 150
 
 # Defines the next coarser frequency for automatic downsampling
 _UPSAMPLE_MAP = {
@@ -133,6 +133,8 @@ def _detect_frequency(dates: pd.Series) -> dict:
 
 
 def _detect_seasonal_period(df: pd.DataFrame, freq_info: dict) -> int | None:
-    if len(df) < MIN_PERIODS_FOR_SEASONALITY:
+    sp = freq_info["seasonal_period"]
+    # Need at least MIN_PERIODS_FOR_SEASONALITY rows AND 2 full seasonal cycles
+    if len(df) < MIN_PERIODS_FOR_SEASONALITY or len(df) < 2 * sp:
         return None
-    return freq_info["seasonal_period"]
+    return sp
