@@ -1,7 +1,8 @@
 import base64
 import io
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fpdf import FPDF
 
@@ -16,8 +17,56 @@ DISPLAY_NAMES = {
 }
 
 LOGO_PATH = Path(__file__).parent.parent / "assets" / "logo-vertical.png"
-HEADER_COLOR = (100, 100, 100)  # dark grey
-FOOTER_COLOR = (100, 100, 100)  # dark grey
+BG_COLOR = (0, 0, 0)            # pure black
+HEADER_COLOR = (150, 150, 150)   # lighter grey for visibility on black
+FOOTER_COLOR = (150, 150, 150)
+TEXT_WHITE = (255, 255, 255)
+TEXT_MUTED = (180, 180, 180)
+
+# Timezone abbreviation mapping
+TZ_ABBREVS = {
+    "Asia/Kolkata": "IST",
+    "America/New_York": "EST",
+    "America/Chicago": "CST",
+    "America/Denver": "MST",
+    "America/Los_Angeles": "PST",
+    "Europe/London": "GMT",
+    "Europe/Paris": "CET",
+    "Asia/Tokyo": "JST",
+    "Asia/Shanghai": "CST",
+    "Australia/Sydney": "AEST",
+    "UTC": "UTC",
+}
+
+
+def _get_local_tz() -> ZoneInfo:
+    """Get the local timezone."""
+    try:
+        import time
+        local_name = time.tzname[0]
+        # Map common Windows timezone names
+        win_tz_map = {
+            "India Standard Time": "Asia/Kolkata",
+            "IST": "Asia/Kolkata",
+            "Eastern Standard Time": "America/New_York",
+            "EST": "America/New_York",
+            "Central Standard Time": "America/Chicago",
+            "Pacific Standard Time": "America/Los_Angeles",
+            "GMT Standard Time": "Europe/London",
+        }
+        tz_name = win_tz_map.get(local_name, "Asia/Kolkata")
+        return ZoneInfo(tz_name)
+    except Exception:
+        return ZoneInfo("Asia/Kolkata")
+
+
+def _format_timestamp() -> str:
+    """Format timestamp with timezone abbreviation, e.g. 'March 06, 2026 at 17:23IST'."""
+    tz = _get_local_tz()
+    now = datetime.now(tz)
+    tz_key = str(tz)
+    abbrev = TZ_ABBREVS.get(tz_key, tz_key)
+    return now.strftime(f"%B %d, %Y at %H:%M{abbrev}")
 
 
 class MarketPulsePDF(FPDF):
@@ -26,6 +75,9 @@ class MarketPulsePDF(FPDF):
         self._selected_display = DISPLAY_NAMES.get(selected_model, selected_model)
 
     def header(self):
+        # Black page background
+        self.set_fill_color(*BG_COLOR)
+        self.rect(0, 0, 210, 297, "F")
         self.set_font("Helvetica", "B", 9)
         self.set_text_color(*HEADER_COLOR)
         self.cell(0, 7, "Market Pulse - Forecast Report", align="R", new_x="LMARGIN", new_y="NEXT")
@@ -41,8 +93,8 @@ class MarketPulsePDF(FPDF):
         self.cell(0, 8, f"Page {self.page_no()}", align="C")
         # Timestamp: bottom-right, same line
         self.set_y(-12)
-        timestamp = datetime.now().strftime("%B %d, %Y at %H:%M")
-        self.cell(0, 8, timestamp, align="R")
+        timestamp = _format_timestamp()
+        self.cell(0, 8, f"Generated on {timestamp}", align="R")
 
 
 def generate_pdf(
@@ -63,32 +115,24 @@ def generate_pdf(
         # ── Page 1: Title + Graph 1 + Summary 1 ──
         pdf.add_page()
 
-        # Logo
+        # Logo (20% bigger: 70 -> 84)
         if LOGO_PATH.exists():
-            pdf.image(str(LOGO_PATH), x=70, y=20, w=70)
-            pdf.ln(65)
+            pdf.image(str(LOGO_PATH), x=63, y=20, w=84)
+            pdf.ln(72)
         else:
             pdf.ln(15)
             pdf.set_font("Helvetica", "B", 24)
-            pdf.set_text_color(255, 255, 255)
+            pdf.set_text_color(*TEXT_WHITE)
             pdf.cell(0, 12, "Market Pulse", align="C", new_x="LMARGIN", new_y="NEXT")
             pdf.ln(5)
 
-        # Tagline
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(150, 150, 150)
-        pdf.cell(0, 6, "See Tomorrow, Today.", align="C", new_x="LMARGIN", new_y="NEXT")
-        pdf.ln(3)
-
-        # Report name
+        # Report name (no tagline)
         pdf.set_font("Helvetica", "B", 14)
-        pdf.set_text_color(60, 60, 60)
+        pdf.set_text_color(*TEXT_WHITE)
         pdf.cell(0, 8, "Forecast Report", align="C", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(8)
 
-        # Three report details (no "Generated")
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(80, 80, 80)
+        # Three report details — white text, bold values
         _add_info_row(pdf, "Selected Model", selected_display)
         _add_info_row(pdf, "MAE", f"{mae_value:,.2f}")
         _add_info_row(pdf, "Forecast Horizon", f"{forecast_horizon} periods")
@@ -96,21 +140,21 @@ def generate_pdf(
 
         # Graph 1 header
         pdf.set_font("Helvetica", "B", 12)
-        pdf.set_text_color(60, 60, 60)
-        pdf.cell(0, 8, f"Primary Model: {selected_display}", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(*TEXT_WHITE)
+        pdf.cell(0, 8, f"Primary Forecast Model: {selected_display}", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
 
         _embed_chart(pdf, chart1_base64)
         pdf.ln(5)
 
         pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(100, 100, 100)
+        pdf.set_text_color(*TEXT_MUTED)
         pdf.multi_cell(0, 5, _sanitize(summary1))
 
         # ── Page 2: Graph 2 + Summary 2 ──
         pdf.add_page()
         pdf.set_font("Helvetica", "B", 12)
-        pdf.set_text_color(60, 60, 60)
+        pdf.set_text_color(*TEXT_WHITE)
         pdf.cell(0, 8, "Model Comparison", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
 
@@ -118,18 +162,18 @@ def generate_pdf(
         pdf.ln(5)
 
         pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(100, 100, 100)
+        pdf.set_text_color(*TEXT_MUTED)
         pdf.multi_cell(0, 5, _sanitize(summary2))
 
         return pdf.output()
 
 
 def _add_info_row(pdf: FPDF, label: str, value: str) -> None:
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(80, 80, 80)
-    pdf.cell(55, 7, label + ":", new_x="RIGHT")
     pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(50, 50, 50)
+    pdf.set_text_color(*TEXT_MUTED)
+    pdf.cell(55, 7, label + ":", new_x="RIGHT")
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*TEXT_WHITE)
     pdf.cell(0, 7, value, new_x="LMARGIN", new_y="NEXT")
 
 

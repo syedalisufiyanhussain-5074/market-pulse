@@ -147,15 +147,13 @@ def _generate_selected_chart(
             alpha=0.5,
         )
 
-    selected_display = DISPLAY_NAMES.get(selected_model, selected_model)
-    ax.set_title(f"Forecast \u2014 {selected_display}", fontsize=14, fontweight="bold", pad=15)
     ax.set_xlabel("")
-    # No Y axis label (removed "Value")
+    # No Y axis label, no title
 
-    # Legend: bottom-center
-    ax.legend(
+    # Legend: bottom-center, pushed down to avoid overlapping x-axis labels
+    leg = ax.legend(
         loc="lower center",
-        bbox_to_anchor=(0.5, -0.22),
+        bbox_to_anchor=(0.5, -0.32),
         ncol=3,
         fontsize=9,
         facecolor=CARD_COLOR,
@@ -163,6 +161,8 @@ def _generate_selected_chart(
         labelcolor=TEXT_COLOR,
         framealpha=0.9,
     )
+    for text in leg.get_texts():
+        text.set_fontweight("bold")
 
     return _fig_to_base64(fig)
 
@@ -247,13 +247,12 @@ def _generate_comparison_chart(
     ax.plot(forecast_dates, excel_ets_forecast,
             color=EXCEL_ETS_COLOR, linewidth=1.5, linestyle="-.", label="ETS (Excel)")
 
-    ax.set_title("Model Comparison", fontsize=14, fontweight="bold", pad=15)
     ax.set_xlabel("")
-    # No Y axis label
+    # No Y axis label, no title
 
-    ax.legend(
+    leg = ax.legend(
         loc="lower center",
-        bbox_to_anchor=(0.5, -0.28),
+        bbox_to_anchor=(0.5, -0.32),
         ncol=5,
         fontsize=8,
         facecolor=CARD_COLOR,
@@ -261,5 +260,7 @@ def _generate_comparison_chart(
         labelcolor=TEXT_COLOR,
         framealpha=0.9,
     )
+    for text in leg.get_texts():
+        text.set_fontweight("bold")
 
     return _fig_to_base64(fig)

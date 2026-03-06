@@ -84,8 +84,8 @@ export default function ColumnSelector({
                   : "border-white/20 bg-black hover:border-white/40"
               }`}
             >
-              <p className="font-medium text-sm">Conservative</p>
-              <p className="text-xs text-muted-foreground mt-1">Avoids overestimation</p>
+              <p className="font-medium text-sm">Avoids Overestimation</p>
+              <p className="text-xs text-muted-foreground mt-1">Conservative approach</p>
             </button>
             <button
               type="button"
@@ -96,8 +96,8 @@ export default function ColumnSelector({
                   : "border-white/20 bg-black hover:border-white/40"
               }`}
             >
-              <p className="font-medium text-sm">Capacity-buffered</p>
-              <p className="text-xs text-muted-foreground mt-1">Avoids stockouts</p>
+              <p className="font-medium text-sm">Avoids Stockouts</p>
+              <p className="text-xs text-muted-foreground mt-1">Capacity-buffered approach</p>
             </button>
           </div>
         </div>
@@ -106,7 +106,7 @@ export default function ColumnSelector({
       <Button
         onClick={() => onConfirm(dateColumn, targetColumn, preference)}
         disabled={!canSubmit}
-        className="w-full bg-white text-black hover:bg-white/90 font-medium border-0"
+        className="w-full bg-white text-black hover:bg-white/90 font-bold border-0"
       >
         {isLoading ? "Analyzing..." : "Generate Forecast"}
       </Button>

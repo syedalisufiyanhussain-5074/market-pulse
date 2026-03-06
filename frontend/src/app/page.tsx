@@ -87,8 +87,8 @@ export default function Home() {
             <Image
               src="/logo-horizontal.png"
               alt="Market Pulse"
-              width={180}
-              height={45}
+              width={216}
+              height={54}
               priority
             />
           </a>
