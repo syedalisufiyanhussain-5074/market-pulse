@@ -18,3 +18,10 @@ class PDFExportRequest(BaseModel):
     chart2_base64: str
     forecast_data: list[dict]
     metrics: dict
+
+
+class ExcelExportRequest(BaseModel):
+    selected_model: str
+    forecast_data: list[dict]
+    historical_data: list[dict]
+    frequency: str

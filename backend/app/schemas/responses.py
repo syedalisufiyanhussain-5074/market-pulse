@@ -18,4 +18,6 @@ class ForecastResponse(BaseModel):
     summary1: str
     summary2: str
     forecast_data: list[dict]
+    historical_data: list[dict]
+    frequency: str
     metrics: dict

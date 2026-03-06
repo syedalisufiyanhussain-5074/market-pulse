@@ -17,6 +17,8 @@ export interface ForecastResponse {
   summary1: string;
   summary2: string;
   forecast_data: { date: string; value: number; lower_bound?: number; upper_bound?: number }[];
+  historical_data: { date: string; value: number }[];
+  frequency: string;
   metrics: Record<string, { mae: number; smape: number; mfe: number }>;
 }
 
@@ -95,6 +97,25 @@ export async function exportPDF(data: ForecastResponse): Promise<Blob> {
 
   if (!res.ok) {
     throw new Error("PDF export failed");
+  }
+
+  return res.blob();
+}
+
+export async function exportExcel(data: ForecastResponse): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/export/excel`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      selected_model: data.selected_model,
+      forecast_data: data.forecast_data,
+      historical_data: data.historical_data,
+      frequency: data.frequency,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Excel export failed");
   }
 
   return res.blob();

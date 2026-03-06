@@ -1,19 +1,20 @@
 "use client";
 
 import { useState } from "react";
-import { Download, Loader2 } from "lucide-react";
+import { Download, FileSpreadsheet, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { exportPDF, type ForecastResponse } from "@/lib/api";
+import { exportPDF, exportExcel, type ForecastResponse } from "@/lib/api";
 
 interface DownloadButtonProps {
   data: ForecastResponse;
 }
 
 export default function DownloadButton({ data }: DownloadButtonProps) {
-  const [isExporting, setIsExporting] = useState(false);
+  const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
 
-  const handleDownload = async () => {
-    setIsExporting(true);
+  const handleDownloadPDF = async () => {
+    setIsExportingPDF(true);
     try {
       const blob = await exportPDF(data);
       const url = URL.createObjectURL(blob);
@@ -27,22 +28,55 @@ export default function DownloadButton({ data }: DownloadButtonProps) {
     } catch (error) {
       console.error("PDF export failed:", error);
     } finally {
-      setIsExporting(false);
+      setIsExportingPDF(false);
+    }
+  };
+
+  const handleDownloadExcel = async () => {
+    setIsExportingExcel(true);
+    try {
+      const blob = await exportExcel(data);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "market-pulse-forecast.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Excel export failed:", error);
+    } finally {
+      setIsExportingExcel(false);
     }
   };
 
   return (
-    <Button
-      onClick={handleDownload}
-      disabled={isExporting}
-      className="bg-white text-black hover:bg-white/90 font-bold border-0"
-    >
-      {isExporting ? (
-        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-      ) : (
-        <Download className="w-4 h-4 mr-2" />
-      )}
-      {isExporting ? "Generating PDF..." : "Download Report"}
-    </Button>
+    <div className="flex gap-2">
+      <Button
+        onClick={handleDownloadExcel}
+        disabled={isExportingExcel}
+        className="bg-white text-black hover:bg-white/90 font-bold border-0 px-4 py-2 text-sm"
+      >
+        {isExportingExcel ? (
+          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+        ) : (
+          <FileSpreadsheet className="w-4 h-4 mr-2" />
+        )}
+        {isExportingExcel ? "Generating..." : "Download Excel"}
+      </Button>
+      <Button
+        onClick={handleDownloadPDF}
+        disabled={isExportingPDF}
+        className="bg-white text-black hover:bg-white/90 font-bold border-0 px-4 py-2 text-sm"
+      >
+        {isExportingPDF ? (
+          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+        ) : (
+          <Download className="w-4 h-4 mr-2" />
+        )}
+        {isExportingPDF ? "Generating..." : "Download PDF"}
+      </Button>
+    </div>
   );
 }

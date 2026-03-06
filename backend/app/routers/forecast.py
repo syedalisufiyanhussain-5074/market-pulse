@@ -4,7 +4,8 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from app.schemas.responses import ForecastResponse
-from app.schemas.requests import PDFExportRequest
+from app.schemas.requests import PDFExportRequest, ExcelExportRequest
+from app.services.excel_export import generate_excel
 from app.services.file_parser import parse_upload
 from app.services.validator import validate_data
 from app.services.data_prep import prepare_data
@@ -89,6 +90,12 @@ async def run_forecast(
                 entry["upper_bound"] = round(float(row[hi_col[0]]), 2)
             forecast_data.append(entry)
 
+        # Build historical data for Excel export
+        historical_data = [
+            {"date": row["ds"].isoformat(), "value": round(float(row["y"]), 2)}
+            for _, row in prepared_df.iterrows()
+        ]
+
         return ForecastResponse(
             selected_model=decision["selected_model"],
             mae_value=decision["selected_metrics"]["mae"],
@@ -98,6 +105,8 @@ async def run_forecast(
             summary1=decision["summary1"],
             summary2=decision["summary2"],
             forecast_data=forecast_data,
+            historical_data=historical_data,
+            frequency=freq,
             metrics={
                 "AutoETS": metrics["AutoETS"],
                 "AutoARIMA": metrics["AutoARIMA"],
@@ -123,4 +132,20 @@ async def export_pdf(request: PDFExportRequest):
         content=bytes(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": "attachment; filename=market-pulse-report.pdf"},
+    )
+
+
+@router.post("/export/excel")
+async def export_excel(request: ExcelExportRequest):
+    excel_bytes = generate_excel(
+        selected_model=request.selected_model,
+        historical_data=request.historical_data,
+        forecast_data=request.forecast_data,
+        frequency=request.frequency,
+    )
+
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=market-pulse-forecast.xlsx"},
     )

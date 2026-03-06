@@ -38,7 +38,7 @@ export default function ForecastResults({ data, displayModel }: ForecastResultsP
             alt="Selected model forecast"
             className="w-full rounded-lg"
           />
-          <p className="text-sm text-white/50 mt-4 leading-relaxed px-2">
+          <p className="text-sm text-white mt-4 leading-relaxed px-2">
             {data.summary1}
           </p>
         </div>
@@ -57,7 +57,7 @@ export default function ForecastResults({ data, displayModel }: ForecastResultsP
             alt="Model comparison"
             className="w-full rounded-lg"
           />
-          <p className="text-sm text-white/50 mt-4 leading-relaxed px-2">
+          <p className="text-sm text-white mt-4 leading-relaxed px-2">
             {data.summary2}
           </p>
         </div>
@@ -69,7 +69,7 @@ export default function ForecastResults({ data, displayModel }: ForecastResultsP
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="border border-white/10 rounded-xl px-5 py-4 bg-black">
-      <p className="text-xs text-white/40 uppercase tracking-wider font-medium">{label}</p>
+      <p className="text-xs text-white uppercase tracking-wider font-medium">{label}</p>
       <p className="text-xl font-semibold text-white mt-1">{value}</p>
     </div>
   );

@@ -85,7 +85,6 @@ export default function ColumnSelector({
               }`}
             >
               <p className="font-medium text-sm">Avoids Overestimation</p>
-              <p className="text-xs text-muted-foreground mt-1">Conservative approach</p>
             </button>
             <button
               type="button"
@@ -97,7 +96,6 @@ export default function ColumnSelector({
               }`}
             >
               <p className="font-medium text-sm">Avoids Stockouts</p>
-              <p className="text-xs text-muted-foreground mt-1">Capacity-buffered approach</p>
             </button>
           </div>
         </div>
