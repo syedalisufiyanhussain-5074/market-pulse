@@ -61,12 +61,12 @@ def _get_local_tz() -> ZoneInfo:
 
 
 def _format_timestamp() -> str:
-    """Format timestamp with timezone abbreviation, e.g. 'March 06, 2026 at 17:23IST'."""
+    """Format timestamp, e.g. 'March 07, 2026 at 01:21 AM IST'."""
     tz = _get_local_tz()
     now = datetime.now(tz)
     tz_key = str(tz)
     abbrev = TZ_ABBREVS.get(tz_key, tz_key)
-    return now.strftime(f"%B %d, %Y at %H:%M{abbrev}")
+    return now.strftime(f"%B %d, %Y at %I:%M %p {abbrev}")
 
 
 class MarketPulsePDF(FPDF):
@@ -148,7 +148,7 @@ def generate_pdf(
         pdf.ln(5)
 
         pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(*TEXT_MUTED)
+        pdf.set_text_color(*TEXT_WHITE)
         pdf.multi_cell(0, 5, _sanitize(summary1))
 
         # ── Page 2: Graph 2 + Summary 2 ──
@@ -162,7 +162,7 @@ def generate_pdf(
         pdf.ln(5)
 
         pdf.set_font("Helvetica", "", 9)
-        pdf.set_text_color(*TEXT_MUTED)
+        pdf.set_text_color(*TEXT_WHITE)
         pdf.multi_cell(0, 5, _sanitize(summary2))
 
         return pdf.output()
