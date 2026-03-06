@@ -13,6 +13,13 @@ FREQUENCY_MAP = {
 }
 
 MIN_PERIODS_FOR_SEASONALITY = 24
+MAX_ROWS_FOR_MODELING = 500
+
+# Defines the next coarser frequency for automatic downsampling
+_UPSAMPLE_MAP = {
+    "D": "W",
+    "W": "MS",
+}
 
 
 def prepare_data(
@@ -37,11 +44,14 @@ def prepare_data(
         # Detect frequency
         freq_info = _detect_frequency(prepared["ds"])
 
+        # Downsample if too many rows for efficient modeling
+        prepared, freq_info = _maybe_downsample(prepared, freq_info, file_hash)
+
         # Interpolate missing values
         prepared["y"] = prepared["y"].interpolate(method="linear")
         prepared["y"] = prepared["y"].bfill().ffill()
 
-        # Detect seasonal period
+        # Detect seasonal period (after downsampling, since freq may have changed)
         seasonal_period = _detect_seasonal_period(prepared, freq_info)
 
         # Add unique_id for statsforecast
@@ -70,6 +80,38 @@ def prepare_data(
             "forecast_horizon": forecast_horizon,
             "freq_label": freq_info["label"],
         }
+
+
+def _maybe_downsample(
+    df: pd.DataFrame, freq_info: dict, file_hash: str = ""
+) -> tuple[pd.DataFrame, dict]:
+    """Resample to a coarser frequency if row count exceeds MAX_ROWS_FOR_MODELING."""
+    current_alias = freq_info["alias"]
+
+    while len(df) > MAX_ROWS_FOR_MODELING and current_alias in _UPSAMPLE_MAP:
+        target_alias = _UPSAMPLE_MAP[current_alias]
+        target_freq_info = FREQUENCY_MAP[target_alias]
+
+        logger.info(
+            f"Downsampling from {freq_info['label']} ({len(df)} rows) to "
+            f"{target_freq_info['label']} to stay within {MAX_ROWS_FOR_MODELING}-row limit",
+            extra={"file_hash": file_hash},
+        )
+
+        df = df.set_index("ds").resample(target_alias).sum().reset_index()
+        df = df[df["y"] != 0]  # drop periods with no data
+        freq_info = target_freq_info
+        current_alias = target_alias
+
+    # Safety cap: keep most recent rows if still too large
+    if len(df) > MAX_ROWS_FOR_MODELING:
+        logger.info(
+            f"Capping data from {len(df)} to {MAX_ROWS_FOR_MODELING} most recent rows",
+            extra={"file_hash": file_hash},
+        )
+        df = df.iloc[-MAX_ROWS_FOR_MODELING:].reset_index(drop=True)
+
+    return df, freq_info
 
 
 def _detect_frequency(dates: pd.Series) -> dict:

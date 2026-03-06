@@ -49,10 +49,24 @@ export async function runForecast(
   formData.append("target_column", targetColumn);
   formData.append("preference", preference);
 
-  const res = await fetch(`${API_BASE}/api/forecast`, {
-    method: "POST",
-    body: formData,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 150_000); // 150s timeout
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/forecast`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Request timed out. The dataset may be too large — try fewer rows or coarser time granularity.");
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
 
   if (!res.ok) {
     const error = await res.json();

@@ -31,7 +31,7 @@ def evaluate_models(
         # Compute baseline metrics from historical data
         y_values = historical_df["y"].values
         ma_metrics = _compute_moving_average_metrics(y_values, forecast_horizon)
-        excel_ets_metrics = _compute_excel_ets_metrics(y_values, forecast_horizon)
+        excel_ets_metrics, excel_ets_forecast = _compute_excel_ets_metrics(y_values, forecast_horizon)
 
         metrics = {
             "AutoETS": ets_metrics,
@@ -46,7 +46,7 @@ def evaluate_models(
             extra={"file_hash": file_hash},
         )
 
-        return metrics
+        return metrics, excel_ets_forecast
 
 
 def _compute_metrics(actuals: np.ndarray, predictions: np.ndarray) -> dict:
@@ -78,10 +78,10 @@ def _compute_moving_average_metrics(y: np.ndarray, horizon: int) -> dict:
     return _compute_metrics(test, ma_pred)
 
 
-def _compute_excel_ets_metrics(y: np.ndarray, horizon: int) -> dict:
-    """Compute metrics for Excel-style Forecast.ETS (additive ETS)."""
+def _compute_excel_ets_metrics(y: np.ndarray, horizon: int) -> tuple[dict, np.ndarray]:
+    """Compute metrics for Excel-style Forecast.ETS and return forecast for reuse."""
     if len(y) < horizon + 4:
-        return {"mae": float("inf"), "smape": float("inf"), "mfe": 0.0}
+        return {"mae": float("inf"), "smape": float("inf"), "mfe": 0.0}, np.full(horizon, np.mean(y))
 
     train = y[:-horizon]
     test = y[-horizon:]
@@ -93,9 +93,15 @@ def _compute_excel_ets_metrics(y: np.ndarray, horizon: int) -> dict:
                 train, trend="add", seasonal=None,
                 initialization_method="estimated",
             ).fit(optimized=True, use_brute=False)
+            # Refit on full data for the forecast that gets passed to charts
+            full_model = ExponentialSmoothing(
+                y, trend="add", seasonal=None,
+                initialization_method="estimated",
+            ).fit(optimized=True, use_brute=False)
             pred = model.forecast(horizon)
+            full_forecast = full_model.forecast(horizon)
         except Exception:
-            # Fallback to simple mean if ETS fails
             pred = np.full(horizon, np.mean(train))
+            full_forecast = np.full(horizon, np.mean(y))
 
-    return _compute_metrics(test, pred)
+    return _compute_metrics(test, pred), full_forecast

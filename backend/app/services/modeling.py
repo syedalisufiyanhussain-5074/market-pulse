@@ -24,8 +24,9 @@ def run_models(
         y = df["y"].values
         dates = df["ds"].values
 
-        # Run cross-validation and final fit for both models
-        n_windows = min(5, len(y) // 3)
+        # Adaptive CV: fewer windows for larger datasets
+        max_windows = 3 if len(y) > 200 else 5
+        n_windows = min(max_windows, len(y) // 3)
         n_windows = max(1, n_windows)
 
         ets_cv, ets_forecast, ets_conf = _fit_auto_ets(
@@ -129,14 +130,18 @@ def _fit_auto_sarima(
     seasonal = seasonal_period is not None and seasonal_period > 1
     m = seasonal_period if seasonal else 1
 
+    # Reduce search space for larger datasets
+    large = len(y) > 200
+    max_pq = 2 if large else 3
+
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         arima_model = pm.auto_arima(
             y,
             seasonal=seasonal,
             m=m,
-            max_p=3,
-            max_q=3,
+            max_p=max_pq,
+            max_q=max_pq,
             max_P=1,
             max_Q=1,
             max_d=2,
@@ -222,10 +227,11 @@ def _rolling_cv_sarima(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             try:
+                maxiter = 30 if len(y) > 200 else 50
                 model = SARIMAX(
                     train, order=order, seasonal_order=seasonal_order,
                     enforce_stationarity=False, enforce_invertibility=False,
-                ).fit(disp=False, maxiter=50)
+                ).fit(disp=False, maxiter=maxiter)
                 pred = model.forecast(horizon)
             except Exception:
                 pred = np.full(horizon, np.mean(train))

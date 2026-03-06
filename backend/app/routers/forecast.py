@@ -46,7 +46,7 @@ async def run_forecast(
         )
 
         # L6: Evaluate
-        metrics = evaluate_models(
+        metrics, excel_ets_forecast = evaluate_models(
             model_result["cv_results"],
             prepared_df,
             forecast_horizon,
@@ -63,6 +63,7 @@ async def run_forecast(
             selected_model=decision["selected_model"],
             alternative_model=decision["alternative_model"],
             forecast_horizon=forecast_horizon,
+            excel_ets_forecast=excel_ets_forecast,
             file_hash=file_hash,
         )
 

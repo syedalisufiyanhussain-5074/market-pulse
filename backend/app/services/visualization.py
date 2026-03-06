@@ -40,6 +40,7 @@ def generate_charts(
     selected_model: str,
     alternative_model: str,
     forecast_horizon: int,
+    excel_ets_forecast: np.ndarray | None = None,
     file_hash: str = "",
 ) -> dict:
     with log_stage(logger, "visualization", file_hash=file_hash):
@@ -47,7 +48,8 @@ def generate_charts(
             historical_df, forecasts, selected_model, forecast_horizon
         )
         chart2 = _generate_comparison_chart(
-            historical_df, forecasts, selected_model, alternative_model, forecast_horizon
+            historical_df, forecasts, selected_model, alternative_model,
+            forecast_horizon, excel_ets_forecast
         )
         return {"chart1_base64": chart1, "chart2_base64": chart2}
 
@@ -181,6 +183,7 @@ def _generate_comparison_chart(
     selected_model: str,
     alternative_model: str,
     forecast_horizon: int,
+    excel_ets_forecast: np.ndarray | None = None,
 ) -> str:
     fig, ax = plt.subplots(figsize=(12, 5))
     _apply_dark_theme(ax, fig)
@@ -232,8 +235,9 @@ def _generate_comparison_chart(
     ax.plot(forecast_dates, np.full(len(forecast_dates), ma_value),
             color=MA_COLOR, linewidth=1.5, linestyle=":", label="Moving Average (Excel)")
 
-    # ETS (Excel) - ORANGE, actual ETS forecast
-    excel_ets_forecast = _compute_excel_ets_forecast(y_vals, forecast_horizon, forecast_dates)
+    # ETS (Excel) - ORANGE, actual ETS forecast (precomputed in evaluation stage)
+    if excel_ets_forecast is None:
+        excel_ets_forecast = _compute_excel_ets_forecast(y_vals, forecast_horizon, forecast_dates)
     ax.plot(forecast_dates, excel_ets_forecast,
             color=EXCEL_ETS_COLOR, linewidth=1.5, linestyle="-.", label="ETS (Excel)")
 
