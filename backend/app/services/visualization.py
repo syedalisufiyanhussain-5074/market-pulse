@@ -112,7 +112,11 @@ def _generate_selected_chart(
     ax.plot(dates, values, color=HISTORICAL_COLOR, linewidth=1.5, label="Historical")
 
     # Forecast
-    pred_col = [c for c in forecasts.columns if selected_model in c and "lo" not in c and "hi" not in c][0]
+    pred_cols = [c for c in forecasts.columns if selected_model in c and "lo" not in c and "hi" not in c]
+    if not pred_cols:
+        logger.warning(f"No forecast column found for {selected_model}")
+        return _fig_to_base64(fig)
+    pred_col = pred_cols[0]
     lo_col = [c for c in forecasts.columns if selected_model in c and "lo" in c]
     hi_col = [c for c in forecasts.columns if selected_model in c and "hi" in c]
 
@@ -210,12 +214,14 @@ def _generate_comparison_chart(
     alt_display = DISPLAY_NAMES.get(alternative_model, alternative_model)
 
     # Selected model (Primary) with confidence band - GREEN
-    sel_col = [c for c in forecasts.columns if selected_model in c and "lo" not in c and "hi" not in c][0]
+    sel_cols = [c for c in forecasts.columns if selected_model in c and "lo" not in c and "hi" not in c]
+    sel_col = sel_cols[0] if sel_cols else None
     lo_col = [c for c in forecasts.columns if selected_model in c and "lo" in c]
     hi_col = [c for c in forecasts.columns if selected_model in c and "hi" in c]
 
-    ax.plot(forecast_dates, forecasts[sel_col], color=ACCENT, linewidth=1.5,
-            label=f"{selected_display} (Primary Model)")
+    if sel_col:
+        ax.plot(forecast_dates, forecasts[sel_col], color=ACCENT, linewidth=1.5,
+                label=f"{selected_display} (Primary Model)")
     if lo_col and hi_col:
         ax.fill_between(
             forecast_dates, forecasts[lo_col[0]], forecasts[hi_col[0]],

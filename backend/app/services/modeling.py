@@ -102,17 +102,25 @@ def _fit_auto_ets(
     cv_results = _rolling_cv_ets(y, best_model, sp, horizon, n_windows)
 
     # Final forecast
-    trend, seasonal = best_model if best_model else (None, None)
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        final_model = ExponentialSmoothing(
-            y, trend=trend, seasonal=seasonal,
-            seasonal_periods=sp, initialization_method="estimated",
-        ).fit(optimized=True, use_brute=False)
+    try:
+        trend, seasonal = best_model if best_model else (None, None)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            final_model = ExponentialSmoothing(
+                y, trend=trend, seasonal=seasonal,
+                seasonal_periods=sp, initialization_method="estimated",
+            ).fit(optimized=True, use_brute=False)
 
-    forecast = final_model.forecast(horizon)
+        forecast = final_model.forecast(horizon)
+        residual_std = np.std(final_model.resid)
+        if np.isnan(residual_std) or residual_std == 0:
+            residual_std = max(float(np.std(y)), 1e-10)
+    except Exception as e:
+        logger.warning(f"Final ETS fit failed, falling back to naive mean: {e}")
+        forecast = np.full(horizon, float(np.mean(y)))
+        residual_std = max(float(np.std(y)), 1e-10)
+
     # Expanding confidence intervals: wider as horizon increases
-    residual_std = np.std(final_model.resid)
     steps = np.arange(1, horizon + 1)
     widths = 1.28 * residual_std * np.sqrt(steps)  # 80% CI, grows with sqrt(h)
     ci_lo = forecast - widths
@@ -134,32 +142,44 @@ def _fit_auto_sarima(
     large = len(y) > 200
     max_pq = 2 if large else 3
 
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        arima_model = pm.auto_arima(
-            y,
-            seasonal=seasonal,
-            m=m,
-            max_p=max_pq,
-            max_q=max_pq,
-            max_P=1,
-            max_Q=1,
-            max_d=2,
-            max_D=1,
-            stepwise=True,
-            suppress_warnings=True,
-            error_action="ignore",
-        )
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            arima_model = pm.auto_arima(
+                y,
+                seasonal=seasonal,
+                m=m,
+                max_p=max_pq,
+                max_q=max_pq,
+                max_P=1,
+                max_Q=1,
+                max_d=2,
+                max_D=1,
+                stepwise=True,
+                suppress_warnings=True,
+                error_action="ignore",
+            )
 
-    # Cross-validation
-    order = arima_model.order
-    seasonal_order = arima_model.seasonal_order
-    cv_results = _rolling_cv_sarima(y, order, seasonal_order, horizon, n_windows)
+        # Cross-validation
+        order = arima_model.order
+        seasonal_order = arima_model.seasonal_order
+        cv_results = _rolling_cv_sarima(y, order, seasonal_order, horizon, n_windows)
 
-    # Final forecast with confidence intervals
-    forecast, conf_int = arima_model.predict(n_periods=horizon, return_conf_int=True, alpha=0.20)
-    ci_lo = conf_int[:, 0]
-    ci_hi = conf_int[:, 1]
+        # Final forecast with confidence intervals
+        forecast, conf_int = arima_model.predict(n_periods=horizon, return_conf_int=True, alpha=0.20)
+        ci_lo = conf_int[:, 0]
+        ci_hi = conf_int[:, 1]
+    except Exception as e:
+        logger.warning(f"AutoARIMA failed, falling back to naive mean: {e}")
+        mean_val = float(np.mean(y))
+        forecast = np.full(horizon, mean_val)
+        residual_std = max(float(np.std(y)), 1e-10)
+        steps = np.arange(1, horizon + 1)
+        widths = 1.28 * residual_std * np.sqrt(steps)
+        ci_lo = forecast - widths
+        ci_hi = forecast + widths
+        n_cv = min(horizon, len(y))
+        cv_results = [{"y": float(y[-n_cv + j]), "AutoARIMA": mean_val} for j in range(n_cv)]
 
     return cv_results, forecast, (ci_lo, ci_hi)
 
@@ -179,7 +199,7 @@ def _rolling_cv_ets(
     for i in range(n_windows):
         test_end = n - i * step
         test_start = test_end - horizon
-        if test_start < horizon:
+        if test_start < max(horizon, 2):
             break
 
         train = y[:test_start]
@@ -194,7 +214,8 @@ def _rolling_cv_ets(
                 ).fit(optimized=True, use_brute=False)
                 pred = model.forecast(horizon)
             except Exception:
-                pred = np.full(horizon, np.mean(train))
+                fallback = float(np.mean(train)) if len(train) > 0 else float(np.mean(y))
+                pred = np.full(horizon, fallback)
 
         for j in range(len(actual)):
             results.append({"y": actual[j], "AutoETS": pred[j]})
@@ -218,7 +239,7 @@ def _rolling_cv_sarima(
     for i in range(n_windows):
         test_end = n - i * step
         test_start = test_end - horizon
-        if test_start < horizon:
+        if test_start < max(horizon, 2):
             break
 
         train = y[:test_start]
@@ -234,7 +255,8 @@ def _rolling_cv_sarima(
                 ).fit(disp=False, maxiter=maxiter)
                 pred = model.forecast(horizon)
             except Exception:
-                pred = np.full(horizon, np.mean(train))
+                fallback = float(np.mean(train)) if len(train) > 0 else float(np.mean(y))
+                pred = np.full(horizon, fallback)
 
         for j in range(len(actual)):
             results.append({"y": actual[j], "AutoARIMA": pred[j]})

@@ -73,6 +73,8 @@ def _compute_moving_average_metrics(y: np.ndarray, horizon: int) -> dict:
     # Use last `horizon` values as test, moving average of prior values as prediction
     test = y[-horizon:]
     window = min(horizon, len(y) - horizon)
+    if window <= 0:
+        return {"mae": float("inf"), "smape": float("inf"), "mfe": 0.0}
     ma_pred = np.full(horizon, np.mean(y[-horizon - window : -horizon]))
 
     return _compute_metrics(test, ma_pred)

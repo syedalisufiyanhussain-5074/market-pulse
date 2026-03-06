@@ -1,6 +1,6 @@
 import io
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 
 from app.schemas.responses import ForecastResponse
@@ -70,7 +70,10 @@ async def run_forecast(
         # Build forecast data for frontend
         forecasts = model_result["forecasts"]
         sel_model = decision["selected_model"]
-        pred_col = [c for c in forecasts.columns if sel_model in c and "lo" not in c and "hi" not in c][0]
+        pred_col_matches = [c for c in forecasts.columns if sel_model in c and "lo" not in c and "hi" not in c]
+        if not pred_col_matches:
+            raise HTTPException(status_code=500, detail="Internal error: forecast column not found")
+        pred_col = pred_col_matches[0]
         lo_col = [c for c in forecasts.columns if sel_model in c and "lo" in c]
         hi_col = [c for c in forecasts.columns if sel_model in c and "hi" in c]
 

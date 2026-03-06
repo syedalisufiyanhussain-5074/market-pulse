@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 
+from fastapi import HTTPException
+
 from app.utils.logger import get_logger, log_stage
 
 logger = get_logger("data_prep")
@@ -51,6 +53,12 @@ def prepare_data(
         prepared["y"] = prepared["y"].interpolate(method="linear")
         prepared["y"] = prepared["y"].bfill().ffill()
 
+        if prepared["y"].isna().all() or len(prepared) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="After processing, no valid numeric values remain. Please check your data column.",
+            )
+
         # Detect seasonal period (after downsampling, since freq may have changed)
         seasonal_period = _detect_seasonal_period(prepared, freq_info)
 
@@ -98,8 +106,15 @@ def _maybe_downsample(
             extra={"file_hash": file_hash},
         )
 
-        df = df.set_index("ds").resample(target_alias).sum().reset_index()
-        df = df[df["y"] != 0]  # drop periods with no data
+        resampled = df.set_index("ds").resample(target_alias).sum().reset_index()
+        resampled = resampled[resampled["y"] != 0]  # drop periods with no data
+        if len(resampled) == 0:
+            logger.warning(
+                f"Downsampling to {target_alias} produced empty data, keeping current granularity",
+                extra={"file_hash": file_hash},
+            )
+            break
+        df = resampled
         freq_info = target_freq_info
         current_alias = target_alias
 
@@ -119,7 +134,13 @@ def _detect_frequency(dates: pd.Series) -> dict:
         return FREQUENCY_MAP["MS"]
 
     diffs = dates.diff().dropna()
+    if len(diffs) == 0:
+        return FREQUENCY_MAP["MS"]
+
     median_diff = diffs.median()
+    if pd.isna(median_diff):
+        return FREQUENCY_MAP["MS"]
+
     days = median_diff.days
 
     if days <= 2:
