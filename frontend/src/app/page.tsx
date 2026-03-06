@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { BarChart3, RotateCcw } from "lucide-react";
+import Image from "next/image";
+import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import FileUploader from "@/components/FileUploader";
 import ColumnSelector from "@/components/ColumnSelector";
@@ -71,17 +72,33 @@ export default function Home() {
     setError(null);
   };
 
+  // Map internal model names to display names
+  const displayModel = (name: string) => {
+    const map: Record<string, string> = { AutoETS: "ETS", AutoARIMA: "ARIMA" };
+    return map[name] || name;
+  };
+
   return (
-    <main className="min-h-screen bg-background">
+    <main className="min-h-screen bg-black">
       {/* Header */}
-      <header className="border-b border-border">
-        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="w-6 h-6 text-emerald-500" />
-            <h1 className="text-xl font-semibold tracking-tight">Market Pulse</h1>
-          </div>
+      <header className="border-b border-white/10">
+        <div className="max-w-3xl mx-auto px-6 py-3 flex items-center justify-between">
+          <a href="/" className="flex items-center">
+            <Image
+              src="/logo-horizontal.png"
+              alt="Market Pulse"
+              width={180}
+              height={45}
+              priority
+            />
+          </a>
           {step !== "upload" && (
-            <Button variant="ghost" size="sm" onClick={handleReset}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleReset}
+              className="text-white/60 hover:text-white hover:bg-white/5 border border-white/10"
+            >
               <RotateCcw className="w-4 h-4 mr-1" />
               Start Over
             </Button>
@@ -102,10 +119,10 @@ export default function Home() {
         {step === "upload" && (
           <div className="space-y-6">
             <div className="text-center space-y-2">
-              <h2 className="text-2xl font-bold tracking-tight">
+              <h2 className="text-2xl font-bold tracking-tight text-white">
                 Upload your dataset
               </h2>
-              <p className="text-muted-foreground">
+              <p className="text-white/50">
                 Get AI-powered demand and price forecasts in seconds.
               </p>
             </div>
@@ -117,12 +134,12 @@ export default function Home() {
         {step === "configure" && uploadData && (
           <div className="space-y-6">
             <div>
-              <h2 className="text-2xl font-bold tracking-tight">Configure forecast</h2>
-              <p className="text-muted-foreground mt-1">
+              <h2 className="text-2xl font-bold tracking-tight text-white">Configure forecast</h2>
+              <p className="text-white/50 mt-1">
                 Confirm your columns and forecasting preference.
               </p>
             </div>
-            <div className="bg-card border border-border rounded-xl p-6">
+            <div className="bg-black border border-white/10 rounded-xl p-6">
               <ColumnSelector
                 dateColumns={uploadData.date_columns}
                 numericColumns={uploadData.numeric_columns}
@@ -142,14 +159,14 @@ export default function Home() {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold tracking-tight">Forecast Results</h2>
-                <p className="text-muted-foreground mt-1">
+                <h2 className="text-2xl font-bold tracking-tight text-white">Forecast Results</h2>
+                <p className="text-white/50 mt-1">
                   Analysis complete. Review your forecast below.
                 </p>
               </div>
               <DownloadButton data={forecastData} />
             </div>
-            <ForecastResults data={forecastData} />
+            <ForecastResults data={forecastData} displayModel={displayModel} />
           </div>
         )}
       </div>

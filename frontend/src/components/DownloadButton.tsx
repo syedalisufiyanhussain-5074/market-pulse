@@ -35,7 +35,7 @@ export default function DownloadButton({ data }: DownloadButtonProps) {
     <Button
       onClick={handleDownload}
       disabled={isExporting}
-      className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+      className="bg-white text-black hover:bg-white/90 font-medium border-0"
     >
       {isExporting ? (
         <Loader2 className="w-4 h-4 mr-2 animate-spin" />

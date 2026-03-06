@@ -38,8 +38,8 @@ export default function FileUploader({ onFileSelect, isLoading }: FileUploaderPr
         border-2 border-dashed rounded-xl p-12 text-center cursor-pointer
         transition-all duration-200
         ${isDragActive
-          ? "border-emerald-500 bg-emerald-500/5"
-          : "border-border hover:border-emerald-500/50 hover:bg-card/50"
+          ? "border-white bg-white/5"
+          : "border-white/20 hover:border-white/50 hover:bg-white/5"
         }
         ${isLoading ? "opacity-50 cursor-not-allowed" : ""}
       `}
@@ -47,7 +47,7 @@ export default function FileUploader({ onFileSelect, isLoading }: FileUploaderPr
       <input {...getInputProps()} />
       <div className="flex flex-col items-center gap-4">
         {isDragActive ? (
-          <FileSpreadsheet className="w-12 h-12 text-emerald-500 animate-bounce" />
+          <FileSpreadsheet className="w-12 h-12 text-white animate-bounce" />
         ) : (
           <Upload className="w-12 h-12 text-muted-foreground" />
         )}

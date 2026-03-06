@@ -1,5 +1,8 @@
+import warnings
+
 import numpy as np
 import pandas as pd
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
 
 from app.utils.logger import get_logger, log_stage
 
@@ -28,13 +31,13 @@ def evaluate_models(
         # Compute baseline metrics from historical data
         y_values = historical_df["y"].values
         ma_metrics = _compute_moving_average_metrics(y_values, forecast_horizon)
-        trend_metrics = _compute_linear_trend_metrics(y_values, forecast_horizon)
+        excel_ets_metrics = _compute_excel_ets_metrics(y_values, forecast_horizon)
 
         metrics = {
             "AutoETS": ets_metrics,
             "AutoARIMA": arima_metrics,
-            "Moving Average": ma_metrics,
-            "Linear Trend": trend_metrics,
+            "Moving Average (Excel)": ma_metrics,
+            "ETS (Excel)": excel_ets_metrics,
         }
 
         logger.info(
@@ -75,17 +78,24 @@ def _compute_moving_average_metrics(y: np.ndarray, horizon: int) -> dict:
     return _compute_metrics(test, ma_pred)
 
 
-def _compute_linear_trend_metrics(y: np.ndarray, horizon: int) -> dict:
-    if len(y) < horizon + 2:
+def _compute_excel_ets_metrics(y: np.ndarray, horizon: int) -> dict:
+    """Compute metrics for Excel-style Forecast.ETS (additive ETS)."""
+    if len(y) < horizon + 4:
         return {"mae": float("inf"), "smape": float("inf"), "mfe": 0.0}
 
     train = y[:-horizon]
     test = y[-horizon:]
 
-    x_train = np.arange(len(train))
-    coeffs = np.polyfit(x_train, train, 1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        try:
+            model = ExponentialSmoothing(
+                train, trend="add", seasonal=None,
+                initialization_method="estimated",
+            ).fit(optimized=True, use_brute=False)
+            pred = model.forecast(horizon)
+        except Exception:
+            # Fallback to simple mean if ETS fails
+            pred = np.full(horizon, np.mean(train))
 
-    x_test = np.arange(len(train), len(train) + horizon)
-    trend_pred = np.polyval(coeffs, x_test)
-
-    return _compute_metrics(test, trend_pred)
+    return _compute_metrics(test, pred)

@@ -97,8 +97,8 @@ async def run_forecast(
             metrics={
                 "AutoETS": metrics["AutoETS"],
                 "AutoARIMA": metrics["AutoARIMA"],
-                "Moving Average": metrics["Moving Average"],
-                "Linear Trend": metrics["Linear Trend"],
+                "Moving Average (Excel)": metrics["Moving Average (Excel)"],
+                "ETS (Excel)": metrics["ETS (Excel)"],
             },
         )
 

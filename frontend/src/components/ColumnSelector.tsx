@@ -35,7 +35,7 @@ export default function ColumnSelector({
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <span className="inline-block w-2 h-2 rounded-full bg-emerald-500" />
+        <span className="inline-block w-2 h-2 rounded-full bg-white" />
         {rowCount.toLocaleString()} rows detected
       </div>
 
@@ -43,7 +43,7 @@ export default function ColumnSelector({
         <div className="space-y-2">
           <Label htmlFor="date-col">Please confirm the date column.</Label>
           <Select value={dateColumn} onValueChange={setDateColumn}>
-            <SelectTrigger id="date-col" className="bg-card border-border">
+            <SelectTrigger id="date-col" className="bg-black border-white/20">
               <SelectValue placeholder="Select date column" />
             </SelectTrigger>
             <SelectContent>
@@ -59,7 +59,7 @@ export default function ColumnSelector({
         <div className="space-y-2">
           <Label htmlFor="target-col">Please select the field to forecast.</Label>
           <Select value={targetColumn} onValueChange={setTargetColumn}>
-            <SelectTrigger id="target-col" className="bg-card border-border">
+            <SelectTrigger id="target-col" className="bg-black border-white/20">
               <SelectValue placeholder="Select target column" />
             </SelectTrigger>
             <SelectContent>
@@ -80,8 +80,8 @@ export default function ColumnSelector({
               onClick={() => setPreference("conservative")}
               className={`p-4 rounded-lg border text-left transition-all ${
                 preference === "conservative"
-                  ? "border-emerald-500 bg-emerald-500/10"
-                  : "border-border bg-card hover:border-emerald-500/30"
+                  ? "border-white bg-white/10"
+                  : "border-white/20 bg-black hover:border-white/40"
               }`}
             >
               <p className="font-medium text-sm">Conservative</p>
@@ -92,8 +92,8 @@ export default function ColumnSelector({
               onClick={() => setPreference("capacity-buffered")}
               className={`p-4 rounded-lg border text-left transition-all ${
                 preference === "capacity-buffered"
-                  ? "border-emerald-500 bg-emerald-500/10"
-                  : "border-border bg-card hover:border-emerald-500/30"
+                  ? "border-white bg-white/10"
+                  : "border-white/20 bg-black hover:border-white/40"
               }`}
             >
               <p className="font-medium text-sm">Capacity-buffered</p>
@@ -106,7 +106,7 @@ export default function ColumnSelector({
       <Button
         onClick={() => onConfirm(dateColumn, targetColumn, preference)}
         disabled={!canSubmit}
-        className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium"
+        className="w-full bg-white text-black hover:bg-white/90 font-medium border-0"
       >
         {isLoading ? "Analyzing..." : "Generate Forecast"}
       </Button>

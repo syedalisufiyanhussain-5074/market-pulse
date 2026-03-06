@@ -1,66 +1,76 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ForecastResponse } from "@/lib/api";
 
 interface ForecastResultsProps {
   data: ForecastResponse;
+  displayModel: (name: string) => string;
 }
 
-export default function ForecastResults({ data }: ForecastResultsProps) {
+export default function ForecastResults({ data, displayModel }: ForecastResultsProps) {
+  const modelDisplay = displayModel(data.selected_model);
+
   return (
     <div className="space-y-8">
       {/* Metrics bar */}
       <div className="grid grid-cols-3 gap-4">
-        <MetricCard label="Selected Model" value={data.selected_model} />
-        <MetricCard label="MAE" value={data.mae_value.toFixed(2)} />
+        <MetricCard label="Selected Model" value={modelDisplay} />
+        <MetricCard
+          label="MAE"
+          value={data.mae_value.toLocaleString(undefined, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+          })}
+        />
         <MetricCard label="Forecast Horizon" value={`${data.forecast_horizon} periods`} />
       </div>
 
       {/* Graph 1: Selected Model */}
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle className="text-lg">Forecast</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="border border-white/10 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-white/5">
+          <h3 className="text-lg font-semibold text-white tracking-tight">
+            Forecast &mdash; {modelDisplay}
+          </h3>
+        </div>
+        <div className="p-4">
           <img
             src={`data:image/png;base64,${data.chart1_base64}`}
             alt="Selected model forecast"
             className="w-full rounded-lg"
           />
-          <p className="text-sm text-muted-foreground mt-4 leading-relaxed">
+          <p className="text-sm text-white/50 mt-4 leading-relaxed px-2">
             {data.summary1}
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Graph 2: Model Comparison */}
-      <Card className="bg-card border-border">
-        <CardHeader>
-          <CardTitle className="text-lg">Model Comparison</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="border border-white/10 rounded-xl overflow-hidden">
+        <div className="px-6 py-4 border-b border-white/5">
+          <h3 className="text-lg font-semibold text-white tracking-tight">
+            Model Comparison
+          </h3>
+        </div>
+        <div className="p-4">
           <img
             src={`data:image/png;base64,${data.chart2_base64}`}
             alt="Model comparison"
             className="w-full rounded-lg"
           />
-          <p className="text-sm text-muted-foreground mt-4 leading-relaxed">
+          <p className="text-sm text-white/50 mt-4 leading-relaxed px-2">
             {data.summary2}
           </p>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="bg-card border-border">
-      <CardContent className="pt-4 pb-4">
-        <p className="text-xs text-muted-foreground uppercase tracking-wider">{label}</p>
-        <p className="text-xl font-semibold text-emerald-500 mt-1">{value}</p>
-      </CardContent>
-    </Card>
+    <div className="border border-white/10 rounded-xl px-5 py-4 bg-black">
+      <p className="text-xs text-white/40 uppercase tracking-wider font-medium">{label}</p>
+      <p className="text-xl font-semibold text-white mt-1">{value}</p>
+    </div>
   );
 }
