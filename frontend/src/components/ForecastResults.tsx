@@ -5,9 +5,17 @@ import type { ForecastResponse } from "@/lib/api";
 interface ForecastResultsProps {
   data: ForecastResponse;
   displayModel: (name: string) => string;
+  timingMs?: {
+    dataProcessing: number | null;
+    predictionGeneration: number | null;
+  };
 }
 
-export default function ForecastResults({ data, displayModel }: ForecastResultsProps) {
+function formatTime(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
+export default function ForecastResults({ data, displayModel, timingMs }: ForecastResultsProps) {
   const modelDisplay = displayModel(data.selected_model);
 
   return (
@@ -24,6 +32,28 @@ export default function ForecastResults({ data, displayModel }: ForecastResultsP
         />
         <MetricCard label="Forecast Horizon" value={`${data.forecast_horizon} periods`} />
       </div>
+
+      {/* Timing metrics */}
+      {timingMs && (timingMs.dataProcessing != null || timingMs.predictionGeneration != null) && (
+        <div className="grid grid-cols-3 gap-4">
+          <MetricCard
+            label="Data Processing"
+            value={timingMs.dataProcessing != null ? formatTime(timingMs.dataProcessing) : "\u2014"}
+          />
+          <MetricCard
+            label="Prediction Generation"
+            value={timingMs.predictionGeneration != null ? formatTime(timingMs.predictionGeneration) : "\u2014"}
+          />
+          <MetricCard
+            label="End-to-End"
+            value={
+              timingMs.dataProcessing != null && timingMs.predictionGeneration != null
+                ? formatTime(timingMs.dataProcessing + timingMs.predictionGeneration)
+                : "\u2014"
+            }
+          />
+        </div>
+      )}
 
       {/* Graph 1: Selected Model */}
       <div className="border border-white/10 rounded-xl overflow-hidden">

@@ -27,7 +27,7 @@ async def run_forecast(
     target_column: str = Form(...),
     preference: str = Form(...),
 ):
-    with log_stage(logger, "full_pipeline"):
+    with log_stage(logger, "prediction_generation"):
         # L1: Parse file
         df, file_hash = await parse_upload(file)
 

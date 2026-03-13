@@ -20,11 +20,14 @@ export default function Home() {
   const [forecastData, setForecastData] = useState<ForecastResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [dataProcessingTimeMs, setDataProcessingTimeMs] = useState<number | null>(null);
+  const [predictionGenerationTimeMs, setPredictionGenerationTimeMs] = useState<number | null>(null);
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
     setError(null);
     setIsUploading(true);
+    const t0 = performance.now();
 
     try {
       const data = await uploadFile(selectedFile);
@@ -42,7 +45,9 @@ export default function Home() {
       }
 
       setStep("configure");
+      setDataProcessingTimeMs(Math.max(0, Math.round(performance.now() - t0)));
     } catch (err) {
+      setDataProcessingTimeMs(Math.max(0, Math.round(performance.now() - t0)));
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setIsUploading(false);
@@ -53,12 +58,15 @@ export default function Home() {
     if (!file) return;
     setError(null);
     setStep("loading");
+    const t0 = performance.now();
 
     try {
       const data = await runForecast(file, dateColumn, targetColumn, preference);
       setForecastData(data);
       setStep("results");
+      setPredictionGenerationTimeMs(Math.max(0, Math.round(performance.now() - t0)));
     } catch (err) {
+      setPredictionGenerationTimeMs(Math.max(0, Math.round(performance.now() - t0)));
       setError(err instanceof Error ? err.message : "Forecast failed");
       setStep("configure");
     }
@@ -70,6 +78,8 @@ export default function Home() {
     setUploadData(null);
     setForecastData(null);
     setError(null);
+    setDataProcessingTimeMs(null);
+    setPredictionGenerationTimeMs(null);
   };
 
   // Map internal model names to display names
@@ -166,7 +176,14 @@ export default function Home() {
               </div>
               <DownloadButton data={forecastData} />
             </div>
-            <ForecastResults data={forecastData} displayModel={displayModel} />
+            <ForecastResults
+              data={forecastData}
+              displayModel={displayModel}
+              timingMs={{
+                dataProcessing: dataProcessingTimeMs,
+                predictionGeneration: predictionGenerationTimeMs,
+              }}
+            />
           </div>
         )}
       </div>
