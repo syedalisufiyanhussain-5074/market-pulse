@@ -2,7 +2,10 @@ import logging
 import json
 import time
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import Any
+
+from app.config import APP_VERSION
 
 
 class JSONFormatter(logging.Formatter):
@@ -49,3 +52,52 @@ def log_stage(logger: logging.Logger, stage: str, **extra: Any):
             f"Completed {stage}",
             extra={**extra, "duration_ms": round(duration, 1)},
         )
+
+
+# ---------------------------------------------------------------------------
+# Audit logger — structured, privacy-safe event log
+# ---------------------------------------------------------------------------
+
+_audit_logger: logging.Logger | None = None
+
+
+def _get_audit_logger() -> logging.Logger:
+    global _audit_logger
+    if _audit_logger is None:
+        _audit_logger = logging.getLogger("market_pulse.audit")
+        _audit_logger.propagate = False
+        if not _audit_logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            _audit_logger.addHandler(handler)
+            _audit_logger.setLevel(logging.INFO)
+    return _audit_logger
+
+
+def audit_log(
+    event_type: str,
+    component: str,
+    session_id: str | None = None,
+    report_type: str | None = None,
+    generated_filename: str | None = None,
+    notes: str | None = None,
+    error_code: str | None = None,
+    duration_ms: float | None = None,
+) -> None:
+    """Write a structured audit entry to stdout (captured by Render)."""
+    now = datetime.now(timezone.utc)
+    entry = {
+        "log_type": "AUDIT",
+        "timestamp": now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z",
+        "app_version": APP_VERSION,
+        "event_type": event_type,
+        "session_id": session_id,
+        "component": component,
+        "report_type": report_type,
+        "generated_filename": generated_filename,
+        "notes": notes,
+        "error_code": error_code,
+        "duration_ms": duration_ms,
+    }
+    entry = {k: v for k, v in entry.items() if v is not None}
+    _get_audit_logger().info(json.dumps(entry))

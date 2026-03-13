@@ -1,5 +1,15 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+function getSessionId(): string {
+  const KEY = "mp_session_id";
+  let id = sessionStorage.getItem(KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    sessionStorage.setItem(KEY, id);
+  }
+  return id;
+}
+
 async function ensureServerAwake(): Promise<void> {
   try {
     await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(150_000) });
@@ -66,6 +76,7 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   try {
     res = await fetch(`${API_BASE}/api/upload`, {
       method: "POST",
+      headers: { "X-Session-ID": getSessionId() },
       body: formData,
       signal: controller.signal,
     });
@@ -106,6 +117,7 @@ export async function runForecast(
   try {
     res = await fetch(`${API_BASE}/api/forecast`, {
       method: "POST",
+      headers: { "X-Session-ID": getSessionId() },
       body: formData,
       signal: controller.signal,
     });
@@ -152,6 +164,7 @@ export async function runForecastStream(
   try {
     res = await fetch(`${API_BASE}/api/forecast/stream`, {
       method: "POST",
+      headers: { "X-Session-ID": getSessionId() },
       body: formData,
       signal: controller.signal,
     });
@@ -236,7 +249,7 @@ export async function exportPDF(
 ): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/export/pdf`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Session-ID": getSessionId() },
     body: JSON.stringify({
       selected_model: data.selected_model,
       mae_value: data.mae_value,
@@ -262,7 +275,7 @@ export async function exportPDF(
 export async function exportExcel(data: ForecastResponse): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/export/excel`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "X-Session-ID": getSessionId() },
     body: JSON.stringify({
       selected_model: data.selected_model,
       forecast_data: data.forecast_data,

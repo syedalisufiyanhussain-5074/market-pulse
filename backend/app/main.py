@@ -1,8 +1,16 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import APP_VERSION
 from app.routers import upload, forecast
+
+
+class SessionIDMiddleware(BaseHTTPMiddleware):
+    """Extract X-Session-ID header and attach to request.state."""
+    async def dispatch(self, request: Request, call_next):
+        request.state.session_id = request.headers.get("X-Session-ID")
+        return await call_next(request)
 
 app = FastAPI(
     title="Market Pulse",
@@ -18,6 +26,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(SessionIDMiddleware)
 
 app.include_router(upload.router)
 app.include_router(forecast.router)

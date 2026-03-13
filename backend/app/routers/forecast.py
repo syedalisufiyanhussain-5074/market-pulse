@@ -1,9 +1,10 @@
 import io
 import json
+import time
 import threading
 from datetime import datetime
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
 from app.config import APP_VERSION
@@ -18,7 +19,7 @@ from app.services.evaluation import evaluate_models
 from app.services.decision import select_best_model
 from app.services.visualization import generate_charts
 from app.services.pdf_export import generate_pdf
-from app.utils.logger import get_logger, log_stage
+from app.utils.logger import get_logger, log_stage, audit_log
 
 logger = get_logger("forecast_router")
 router = APIRouter(prefix="/api", tags=["forecast"])
@@ -74,54 +75,76 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
 
 @router.post("/forecast", response_model=ForecastResponse)
 async def run_forecast(
+    request: Request,
     file: UploadFile = File(...),
     date_column: str = Form(...),
     target_column: str = Form(...),
     preference: str = Form(...),
 ):
-    with log_stage(logger, "prediction_generation"):
-        # L1: Parse file
-        df, file_hash = await parse_upload(file)
+    t0 = time.perf_counter()
+    session_id = getattr(request.state, "session_id", None)
+    try:
+        with log_stage(logger, "prediction_generation"):
+            df, file_hash = await parse_upload(file)
+            parsed = validate_data(df, date_column, target_column, file_hash=file_hash)
+            prep_result = prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed)
+            prepared_df = prep_result["df"]
+            freq = prep_result["freq"]
+            seasonal_period = prep_result["seasonal_period"]
+            forecast_horizon = prep_result["forecast_horizon"]
 
-        # L3: Validate (returns pre-parsed columns)
-        parsed = validate_data(df, date_column, target_column, file_hash=file_hash)
+            model_result = run_models(
+                prepared_df, freq, seasonal_period, forecast_horizon, file_hash=file_hash
+            )
 
-        # L4: Prepare (uses pre-parsed columns to avoid double parsing)
-        prep_result = prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed)
-        prepared_df = prep_result["df"]
-        freq = prep_result["freq"]
-        seasonal_period = prep_result["seasonal_period"]
-        forecast_horizon = prep_result["forecast_horizon"]
+            metrics, excel_ets_forecast = evaluate_models(
+                model_result["cv_results"],
+                prepared_df,
+                forecast_horizon,
+                file_hash=file_hash,
+            )
 
-        # L5: Model
-        model_result = run_models(
-            prepared_df, freq, seasonal_period, forecast_horizon, file_hash=file_hash
+            decision = select_best_model(metrics, preference, file_hash=file_hash)
+
+            charts = generate_charts(
+                historical_df=prepared_df,
+                forecasts=model_result["forecasts"],
+                selected_model=decision["selected_model"],
+                alternative_model=decision["alternative_model"],
+                forecast_horizon=forecast_horizon,
+                excel_ets_forecast=excel_ets_forecast,
+                file_hash=file_hash,
+            )
+
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq)
+            audit_log(
+                event_type="forecast_run",
+                component="forecast_router",
+                session_id=session_id,
+                duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+            )
+            return ForecastResponse(**result)
+    except HTTPException as e:
+        detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
+        audit_log(
+            event_type="error",
+            component="forecast_router",
+            session_id=session_id,
+            notes=detail.get("message", str(e.detail)),
+            error_code=detail.get("error_code"),
+            duration_ms=round((time.perf_counter() - t0) * 1000, 1),
         )
-
-        # L6: Evaluate
-        metrics, excel_ets_forecast = evaluate_models(
-            model_result["cv_results"],
-            prepared_df,
-            forecast_horizon,
-            file_hash=file_hash,
+        raise
+    except Exception as e:
+        audit_log(
+            event_type="error",
+            component="forecast_router",
+            session_id=session_id,
+            notes=str(e),
+            error_code="INTERNAL_ERROR",
+            duration_ms=round((time.perf_counter() - t0) * 1000, 1),
         )
-
-        # L7: Decide
-        decision = select_best_model(metrics, preference, file_hash=file_hash)
-
-        # L8: Visualize
-        charts = generate_charts(
-            historical_df=prepared_df,
-            forecasts=model_result["forecasts"],
-            selected_model=decision["selected_model"],
-            alternative_model=decision["alternative_model"],
-            forecast_horizon=forecast_horizon,
-            excel_ets_forecast=excel_ets_forecast,
-            file_hash=file_hash,
-        )
-
-        result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq)
-        return ForecastResponse(**result)
+        raise
 
 
 def _sse(event: str, **data) -> str:
@@ -153,6 +176,7 @@ def _run_with_heartbeats(fn, interval=10):
 
 @router.post("/forecast/stream")
 async def run_forecast_stream(
+    request: Request,
     file: UploadFile = File(...),
     date_column: str = Form(...),
     target_column: str = Form(...),
@@ -161,8 +185,10 @@ async def run_forecast_stream(
     # Read file bytes in async context before entering sync generator
     contents = await file.read()
     filename = file.filename or ""
+    session_id = getattr(request.state, "session_id", None)
 
     def generate():
+        t0 = time.perf_counter()
         try:
             yield _sse("heartbeat")
             yield _sse("progress", progress=5, message="Reading your data...")
@@ -233,12 +259,34 @@ async def run_forecast_stream(
 
             yield _sse("progress", progress=98, message="Finalizing your forecast...")
             result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq)
+            audit_log(
+                event_type="forecast_run",
+                component="forecast_router",
+                session_id=session_id,
+                duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+            )
             yield _sse("complete", **result)
 
         except HTTPException as e:
             detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
+            audit_log(
+                event_type="error",
+                component="forecast_router",
+                session_id=session_id,
+                notes=detail.get("message", str(e.detail)),
+                error_code=detail.get("error_code"),
+                duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+            )
             yield _sse("error", **detail)
         except Exception as e:
+            audit_log(
+                event_type="error",
+                component="forecast_router",
+                session_id=session_id,
+                notes=str(e),
+                error_code="INTERNAL_ERROR",
+                duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+            )
             yield _sse("error", message=str(e), error_code="INTERNAL_ERROR")
 
     return StreamingResponse(
@@ -249,7 +297,9 @@ async def run_forecast_stream(
 
 
 @router.post("/export/pdf")
-async def export_pdf(request: PDFExportRequest):
+async def export_pdf(http_request: Request, request: PDFExportRequest):
+    t0 = time.perf_counter()
+    session_id = getattr(http_request.state, "session_id", None)
     pdf_bytes = generate_pdf(
         selected_model=request.selected_model,
         mae_value=request.mae_value,
@@ -263,15 +313,27 @@ async def export_pdf(request: PDFExportRequest):
         prediction_generation_ms=request.prediction_generation_ms,
     )
 
+    filename = f"MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_Report.pdf"
+    audit_log(
+        event_type="report_download_pdf",
+        component="forecast_router",
+        session_id=session_id,
+        report_type="pdf",
+        generated_filename=filename,
+        duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+    )
+
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_Report.pdf"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
 
 
 @router.post("/export/excel")
-async def export_excel(request: ExcelExportRequest):
+async def export_excel(http_request: Request, request: ExcelExportRequest):
+    t0 = time.perf_counter()
+    session_id = getattr(http_request.state, "session_id", None)
     excel_bytes = generate_excel(
         selected_model=request.selected_model,
         historical_data=request.historical_data,
@@ -279,8 +341,18 @@ async def export_excel(request: ExcelExportRequest):
         frequency=request.frequency,
     )
 
+    filename = f"MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_Report.xlsx"
+    audit_log(
+        event_type="report_download_excel",
+        component="forecast_router",
+        session_id=session_id,
+        report_type="excel",
+        generated_filename=filename,
+        duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+    )
+
     return Response(
         content=excel_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename=MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_Report.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
