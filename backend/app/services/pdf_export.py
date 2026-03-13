@@ -61,12 +61,12 @@ def _get_local_tz() -> ZoneInfo:
 
 
 def _format_timestamp() -> str:
-    """Format timestamp, e.g. 'March 07, 2026 at 01:21 AM IST'."""
+    """Format timestamp, e.g. '14/03/2026 at 01:21 AM IST'."""
     tz = _get_local_tz()
     now = datetime.now(tz)
     tz_key = str(tz)
     abbrev = TZ_ABBREVS.get(tz_key, tz_key)
-    return now.strftime(f"%B %d, %Y at %I:%M %p {abbrev}")
+    return now.strftime(f"%d/%m/%Y at %I:%M %p {abbrev}")
 
 
 class MarketPulsePDF(FPDF):

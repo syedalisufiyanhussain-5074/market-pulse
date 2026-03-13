@@ -82,22 +82,33 @@ def generate_excel(
     data_align = Alignment(horizontal="center", vertical="center")
     number_format = "#,##0.00"
 
+    # Remove default gridlines
+    ws.sheet_view.showGridLines = False
+
     # Logo (rows 1-2)
     if LOGO_PATH.exists():
         logo = XlImage(str(LOGO_PATH))
         logo.width = 150
         logo.height = int(150 * 791 / 2160)  # maintain aspect ratio
         ws.add_image(logo, "A1")
-    ws.row_dimensions[1].height = 30
-    ws.row_dimensions[2].height = 25
+    ws.row_dimensions[1].height = 20.5
+    ws.row_dimensions[2].height = 20.5
 
-    # Title row (row 3)
+    # Title row (row 3) with thick border
     title_font = Font(name="Calibri", bold=True, size=14, color="1F2937")
+    thick_border = Border(
+        left=Side(style="thick", color="1F2937"),
+        right=Side(style="thick", color="1F2937"),
+        top=Side(style="thick", color="1F2937"),
+        bottom=Side(style="thick", color="1F2937"),
+    )
     ws.merge_cells("A3:E3")
     ws["A3"] = f"Market Pulse — {model_display} Forecast ({freq_label})"
     ws["A3"].font = title_font
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center")
-    ws.row_dimensions[3].height = 30
+    ws.row_dimensions[3].height = 20.5
+    for col_idx in range(1, 6):
+        ws.cell(row=3, column=col_idx).border = thick_border
 
     # Headers (row 5)
     headers = ["Date", "Actual", "Forecast", "Lower Bound", "Upper Bound"]

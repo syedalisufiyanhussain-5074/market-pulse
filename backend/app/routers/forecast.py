@@ -266,7 +266,7 @@ async def export_pdf(request: PDFExportRequest):
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": f"attachment; filename=MarketPulse_{datetime.now().strftime('%Y%m%d')}_V{APP_VERSION}_Report.pdf"},
+        headers={"Content-Disposition": f"attachment; filename=MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_Report.pdf"},
     )
 
 
@@ -282,5 +282,5 @@ async def export_excel(request: ExcelExportRequest):
     return Response(
         content=excel_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename=MarketPulse_{datetime.now().strftime('%Y%m%d')}_V{APP_VERSION}_Report.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename=MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_Report.xlsx"},
     )
