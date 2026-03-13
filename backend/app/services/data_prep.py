@@ -29,12 +29,17 @@ def prepare_data(
     date_column: str,
     target_column: str,
     file_hash: str = "",
+    parsed_columns: dict | None = None,
 ) -> dict:
     with log_stage(logger, "data_preparation", file_hash=file_hash, row_count=len(df)):
-        # Parse dates and numeric target
+        # Use pre-parsed columns from validator if available, otherwise parse here
         prepared = pd.DataFrame()
-        prepared["ds"] = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
-        prepared["y"] = pd.to_numeric(df[target_column], errors="coerce")
+        if parsed_columns:
+            prepared["ds"] = parsed_columns["parsed_dates"]
+            prepared["y"] = parsed_columns["parsed_values"]
+        else:
+            prepared["ds"] = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
+            prepared["y"] = pd.to_numeric(df[target_column], errors="coerce")
         prepared = prepared.dropna(subset=["ds"])
 
         # Sort chronologically
@@ -56,7 +61,7 @@ def prepare_data(
         if prepared["y"].isna().all() or len(prepared) == 0:
             raise HTTPException(
                 status_code=400,
-                detail="After processing, no valid numeric values remain. Please check your data column.",
+                detail={"message": "After processing, no valid numeric values remain. Please check your data column.", "error_code": "NO_VALID_VALUES"},
             )
 
         # Detect seasonal period (after downsampling, since freq may have changed)

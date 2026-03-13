@@ -1,5 +1,11 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export class AppError extends Error {
+  constructor(message: string, public errorCode?: string) {
+    super(message);
+  }
+}
+
 export interface UploadResponse {
   date_columns: string[];
   numeric_columns: string[];
@@ -22,6 +28,14 @@ export interface ForecastResponse {
   metrics: Record<string, { mae: number; smape: number; mfe: number }>;
 }
 
+function extractError(detail: unknown, fallback: string): AppError {
+  if (typeof detail === "object" && detail !== null) {
+    const d = detail as Record<string, string>;
+    return new AppError(d.message || fallback, d.error_code);
+  }
+  return new AppError(typeof detail === "string" ? detail : fallback);
+}
+
 export async function uploadFile(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
@@ -33,7 +47,7 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
 
   if (!res.ok) {
     const error = await res.json();
-    throw new Error(error.detail || "Upload failed");
+    throw extractError(error.detail, "Upload failed");
   }
 
   return res.json();
@@ -52,7 +66,8 @@ export async function runForecast(
   formData.append("preference", preference);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 150_000); // 150s timeout
+  // Render free tier has ~30s hard limit; 90s is a client-side safety net
+  const timeoutId = setTimeout(() => controller.abort(), 90_000);
 
   let res: Response;
   try {
@@ -64,7 +79,7 @@ export async function runForecast(
   } catch (err: unknown) {
     clearTimeout(timeoutId);
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("Request timed out. The dataset may be too large — try fewer rows or coarser time granularity.");
+      throw new AppError("Request timed out. The dataset may be too large — try fewer rows or coarser time granularity.");
     }
     throw err;
   }
@@ -72,10 +87,80 @@ export async function runForecast(
 
   if (!res.ok) {
     const error = await res.json();
-    throw new Error(error.detail || "Forecast failed");
+    throw extractError(error.detail, "Forecast failed");
   }
 
   return res.json();
+}
+
+export async function runForecastStream(
+  file: File,
+  dateColumn: string,
+  targetColumn: string,
+  preference: string,
+  onProgress: (progress: number, message: string) => void,
+): Promise<ForecastResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("date_column", dateColumn);
+  formData.append("target_column", targetColumn);
+  formData.append("preference", preference);
+
+  const controller = new AbortController();
+  // Render free tier has ~30s hard limit; 90s is a client-side safety net
+  const timeoutId = setTimeout(() => controller.abort(), 90_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/forecast/stream`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new AppError("Request timed out. The dataset may be too large — try fewer rows or coarser time granularity.");
+    }
+    throw err;
+  }
+  clearTimeout(timeoutId);
+
+  if (!res.body) {
+    throw new AppError("Stream not supported by browser", "STREAM_ERROR");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const events = buffer.split("\n\n");
+    buffer = events.pop()!;
+
+    for (const raw of events) {
+      const eventMatch = raw.match(/^event: (.+)$/m);
+      const dataMatch = raw.match(/^data: (.+)$/m);
+      if (!eventMatch || !dataMatch) continue;
+
+      const type = eventMatch[1];
+      const data = JSON.parse(dataMatch[1]);
+
+      if (type === "progress") {
+        onProgress(data.progress, data.message);
+      } else if (type === "complete") {
+        return data as ForecastResponse;
+      } else if (type === "error") {
+        throw new AppError(data.message || "Forecast failed", data.error_code);
+      }
+    }
+  }
+
+  throw new AppError("Stream ended without result", "STREAM_ERROR");
 }
 
 export async function exportPDF(data: ForecastResponse): Promise<Blob> {

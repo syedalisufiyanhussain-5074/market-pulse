@@ -28,6 +28,7 @@ export default function FileUploader({ onFileSelect, isLoading }: FileUploaderPr
     onDrop,
     accept: ACCEPTED_TYPES,
     maxFiles: 1,
+    maxSize: 10 * 1024 * 1024, // 10MB
     disabled: isLoading,
   });
 
@@ -56,7 +57,7 @@ export default function FileUploader({ onFileSelect, isLoading }: FileUploaderPr
             {isDragActive ? "Drop your file here" : "Drop your CSV or Excel file here"}
           </p>
           <p className="text-sm text-muted-foreground mt-1">
-            or click to browse. Supports .csv and .xlsx files up to 100,000 rows.
+            or click to browse. Supports .csv and .xlsx files up to 10MB and 100,000 rows.
           </p>
         </div>
       </div>

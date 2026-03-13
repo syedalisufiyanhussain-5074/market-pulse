@@ -9,9 +9,11 @@ import ColumnSelector from "@/components/ColumnSelector";
 import LoadingState from "@/components/LoadingState";
 import ForecastResults from "@/components/ForecastResults";
 import DownloadButton from "@/components/DownloadButton";
-import { uploadFile, runForecast, type UploadResponse, type ForecastResponse } from "@/lib/api";
+import { uploadFile, runForecastStream, AppError, type UploadResponse, type ForecastResponse } from "@/lib/api";
 
 type Step = "upload" | "configure" | "loading" | "results";
+
+const DATA_QUALITY_CODES = ["INSUFFICIENT_PERIODS", "EXCESSIVE_MISSING", "NO_VALID_VALUES"];
 
 export default function Home() {
   const [step, setStep] = useState<Step>("upload");
@@ -22,6 +24,7 @@ export default function Home() {
   const [isUploading, setIsUploading] = useState(false);
   const [dataProcessingTimeMs, setDataProcessingTimeMs] = useState<number | null>(null);
   const [predictionGenerationTimeMs, setPredictionGenerationTimeMs] = useState<number | null>(null);
+  const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
@@ -58,17 +61,32 @@ export default function Home() {
     if (!file) return;
     setError(null);
     setStep("loading");
+    setProgress(null);
     const t0 = performance.now();
 
     try {
-      const data = await runForecast(file, dateColumn, targetColumn, preference);
+      const data = await runForecastStream(
+        file, dateColumn, targetColumn, preference,
+        (pct, message) => setProgress({ pct, message }),
+      );
       setForecastData(data);
       setStep("results");
       setPredictionGenerationTimeMs(Math.max(0, Math.round(performance.now() - t0)));
     } catch (err) {
       setPredictionGenerationTimeMs(Math.max(0, Math.round(performance.now() - t0)));
-      setError(err instanceof Error ? err.message : "Forecast failed");
-      setStep("configure");
+      const message = err instanceof Error ? err.message : "Forecast failed";
+      const errorCode = err instanceof AppError ? err.errorCode : undefined;
+      setError(message);
+
+      if (errorCode && DATA_QUALITY_CODES.includes(errorCode)) {
+        // Data quality issue — force new upload
+        setStep("upload");
+        setFile(null);
+        setUploadData(null);
+      } else {
+        // Retriable: timeout, column error, server error
+        setStep("configure");
+      }
     }
   };
 
@@ -80,6 +98,7 @@ export default function Home() {
     setError(null);
     setDataProcessingTimeMs(null);
     setPredictionGenerationTimeMs(null);
+    setProgress(null);
   };
 
   // Map internal model names to display names
@@ -162,7 +181,12 @@ export default function Home() {
         )}
 
         {/* Step: Loading */}
-        {step === "loading" && <LoadingState />}
+        {step === "loading" && (
+          <LoadingState
+            progress={progress?.pct ?? 0}
+            message={progress?.message ?? "Starting..."}
+          />
+        )}
 
         {/* Step: Results */}
         {step === "results" && forecastData && (

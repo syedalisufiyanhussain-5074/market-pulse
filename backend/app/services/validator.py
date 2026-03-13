@@ -14,22 +14,36 @@ def validate_data(
     date_column: str,
     target_column: str,
     file_hash: str = "",
-) -> None:
+) -> dict:
+    """Validate data and return pre-parsed columns to avoid double parsing in data_prep."""
     with log_stage(logger, "data_validation", file_hash=file_hash):
         _validate_columns_exist(df, date_column, target_column)
-        _validate_date_column(df, date_column, file_hash)
-        _validate_target_column(df, target_column, file_hash)
+
+        with log_stage(logger, "date_parsing", file_hash=file_hash):
+            parsed_dates = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
+        _validate_date_column(parsed_dates, file_hash)
+
+        with log_stage(logger, "numeric_parsing", file_hash=file_hash):
+            parsed_values = pd.to_numeric(df[target_column], errors="coerce")
+        _validate_target_column(parsed_values, file_hash)
+
+        return {"parsed_dates": parsed_dates, "parsed_values": parsed_values}
 
 
 def _validate_columns_exist(df: pd.DataFrame, date_column: str, target_column: str) -> None:
     if date_column not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Column '{date_column}' not found in dataset.")
+        raise HTTPException(
+            status_code=400,
+            detail={"message": f"Column '{date_column}' not found in dataset.", "error_code": "COLUMN_NOT_FOUND"},
+        )
     if target_column not in df.columns:
-        raise HTTPException(status_code=400, detail=f"Column '{target_column}' not found in dataset.")
+        raise HTTPException(
+            status_code=400,
+            detail={"message": f"Column '{target_column}' not found in dataset.", "error_code": "COLUMN_NOT_FOUND"},
+        )
 
 
-def _validate_date_column(df: pd.DataFrame, date_column: str, file_hash: str) -> None:
-    dates = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
+def _validate_date_column(dates: pd.Series, file_hash: str) -> None:
     unique_periods = dates.dropna().nunique()
 
     if unique_periods < MIN_PERIODS:
@@ -39,12 +53,14 @@ def _validate_date_column(df: pd.DataFrame, date_column: str, file_hash: str) ->
         )
         raise HTTPException(
             status_code=400,
-            detail=f"The dataset requires at least {MIN_PERIODS} unique time periods for reliable forecasting. Found {unique_periods}.",
+            detail={
+                "message": f"The dataset requires at least {MIN_PERIODS} unique time periods for reliable forecasting. Found {unique_periods}.",
+                "error_code": "INSUFFICIENT_PERIODS",
+            },
         )
 
 
-def _validate_target_column(df: pd.DataFrame, target_column: str, file_hash: str) -> None:
-    numeric_series = pd.to_numeric(df[target_column], errors="coerce")
+def _validate_target_column(numeric_series: pd.Series, file_hash: str) -> None:
     total = len(numeric_series)
     missing = numeric_series.isna().sum()
     missing_ratio = missing / total if total > 0 else 1.0
@@ -56,5 +72,8 @@ def _validate_target_column(df: pd.DataFrame, target_column: str, file_hash: str
         )
         raise HTTPException(
             status_code=400,
-            detail="The dataset contains excessive missing values. Please provide a more complete dataset for reliable forecasting.",
+            detail={
+                "message": "The dataset contains excessive missing values. Please provide a more complete dataset for reliable forecasting.",
+                "error_code": "EXCESSIVE_MISSING",
+            },
         )
