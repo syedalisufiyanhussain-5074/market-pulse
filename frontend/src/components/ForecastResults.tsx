@@ -35,7 +35,7 @@ export default function ForecastResults({ data, displayModel, timingMs }: Foreca
           value={`${data.mae_value.toLocaleString(undefined, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
-          })} points (~${data.metrics[data.selected_model]?.smape.toFixed(1) ?? "?"}%)`}
+          })} pts (~${data.metrics[data.selected_model]?.smape.toFixed(1) ?? "?"}%)`}
         />
         <MetricCard label="Forecast Window" value={`${data.forecast_horizon} periods`} />
       </div>
