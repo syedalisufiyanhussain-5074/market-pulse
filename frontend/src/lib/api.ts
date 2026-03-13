@@ -1,5 +1,11 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+async function ensureServerAwake(): Promise<void> {
+  try {
+    await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(150_000) });
+  } catch { /* server may still be starting, proceed anyway */ }
+}
+
 export class AppError extends Error {
   constructor(message: string, public errorCode?: string) {
     super(message);
@@ -37,11 +43,13 @@ function extractError(detail: unknown, fallback: string): AppError {
 }
 
 export async function uploadFile(file: File): Promise<UploadResponse> {
+  await ensureServerAwake();
+
   const formData = new FormData();
   formData.append("file", file);
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 90_000);
+  const timeoutId = setTimeout(() => controller.abort(), 180_000);
 
   let res: Response;
   try {
@@ -122,8 +130,12 @@ export async function runForecastStream(
 
   const controller = new AbortController();
 
-  // Phase 1: Connection timeout (90s) — covers Render cold start
-  const connectTimeout = setTimeout(() => controller.abort(), 90_000);
+  // Wake server before heavy request (absorbs cold start)
+  onProgress(2, "Waking up the server...");
+  await ensureServerAwake();
+
+  // Phase 1: Connection timeout (180s)
+  const connectTimeout = setTimeout(() => controller.abort(), 180_000);
 
   let res: Response;
   try {

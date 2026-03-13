@@ -92,8 +92,8 @@ export default function Home() {
     if (!file) return;
     setError(null);
     setStep("loading");
-    setProgress(null);
-    setLastEventTime(null);
+    setProgress({ pct: 1, message: "Waking up the server..." });
+    setLastEventTime(Date.now());
     const t0 = performance.now();
 
     try {
