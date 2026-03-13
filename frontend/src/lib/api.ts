@@ -6,6 +6,17 @@ async function ensureServerAwake(): Promise<void> {
   } catch { /* server may still be starting, proceed anyway */ }
 }
 
+export async function fetchAppVersion(): Promise<string> {
+  try {
+    const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(5_000) });
+    if (res.ok) {
+      const data = await res.json();
+      return data.version ?? "1.3";
+    }
+  } catch { /* fallback */ }
+  return "1.3";
+}
+
 export class AppError extends Error {
   constructor(message: string, public errorCode?: string) {
     super(message);

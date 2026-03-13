@@ -8,9 +8,19 @@ import { exportPDF, exportExcel, type ForecastResponse } from "@/lib/api";
 interface DownloadButtonProps {
   data: ForecastResponse;
   timingMs?: { dataProcessing: number | null; predictionGeneration: number | null };
+  appVersion?: string;
 }
 
-export default function DownloadButton({ data, timingMs }: DownloadButtonProps) {
+function generateFilename(ext: string, appVersion: string): string {
+  const now = new Date();
+  const date = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  const key = `mp_reports_${date}`;
+  const count = parseInt(localStorage.getItem(key) ?? "0", 10) + 1;
+  localStorage.setItem(key, String(count));
+  return `MarketPulse_${date}_V${appVersion}_Report_${count}.${ext}`;
+}
+
+export default function DownloadButton({ data, timingMs, appVersion = "1.3" }: DownloadButtonProps) {
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
 
@@ -21,7 +31,7 @@ export default function DownloadButton({ data, timingMs }: DownloadButtonProps) 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "market-pulse-report.pdf";
+      a.download = generateFilename("pdf", appVersion);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -40,7 +50,7 @@ export default function DownloadButton({ data, timingMs }: DownloadButtonProps) 
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "market-pulse-forecast.xlsx";
+      a.download = generateFilename("xlsx", appVersion);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

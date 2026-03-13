@@ -1,11 +1,15 @@
 import io
 from datetime import datetime
+from pathlib import Path
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as XlImage
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
 from app.utils.logger import get_logger, log_stage
+
+LOGO_PATH = Path(__file__).parent.parent / "assets" / "logo-bold-horizontal.png"
 
 logger = get_logger("excel_export")
 
@@ -78,25 +82,34 @@ def generate_excel(
     data_align = Alignment(horizontal="center", vertical="center")
     number_format = "#,##0.00"
 
-    # Title row
-    title_font = Font(name="Calibri", bold=True, size=14, color="1F2937")
-    ws.merge_cells("A1:E1")
-    ws["A1"] = f"Market Pulse — {model_display} Forecast ({freq_label})"
-    ws["A1"].font = title_font
-    ws["A1"].alignment = Alignment(horizontal="left", vertical="center")
+    # Logo (rows 1-2)
+    if LOGO_PATH.exists():
+        logo = XlImage(str(LOGO_PATH))
+        logo.width = 150
+        logo.height = int(150 * 791 / 2160)  # maintain aspect ratio
+        ws.add_image(logo, "A1")
     ws.row_dimensions[1].height = 30
+    ws.row_dimensions[2].height = 25
 
-    # Headers (row 3)
+    # Title row (row 3)
+    title_font = Font(name="Calibri", bold=True, size=14, color="1F2937")
+    ws.merge_cells("A3:E3")
+    ws["A3"] = f"Market Pulse — {model_display} Forecast ({freq_label})"
+    ws["A3"].font = title_font
+    ws["A3"].alignment = Alignment(horizontal="left", vertical="center")
+    ws.row_dimensions[3].height = 30
+
+    # Headers (row 5)
     headers = ["Date", "Actual", "Forecast", "Lower Bound", "Upper Bound"]
     for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=3, column=col_idx, value=header)
+        cell = ws.cell(row=5, column=col_idx, value=header)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = header_align
         cell.border = thin_border
 
     # Historical data
-    row = 4
+    row = 6
     for entry in historical_data:
         date_str = _format_date(entry["date"], frequency)
         ws.cell(row=row, column=1, value=date_str).font = data_font
@@ -156,7 +169,7 @@ def generate_excel(
     for col_idx in range(1, 6):
         col_letter = get_column_letter(col_idx)
         max_len = len(headers[col_idx - 1])
-        for r in range(4, row):
+        for r in range(6, row):
             cell = ws.cell(row=r, column=col_idx)
             val = cell.value
             if val is None or val == "":

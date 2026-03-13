@@ -9,7 +9,7 @@ import ColumnSelector from "@/components/ColumnSelector";
 import LoadingState from "@/components/LoadingState";
 import ForecastResults from "@/components/ForecastResults";
 import DownloadButton from "@/components/DownloadButton";
-import { uploadFile, runForecastStream, AppError, type UploadResponse, type ForecastResponse } from "@/lib/api";
+import { uploadFile, runForecastStream, fetchAppVersion, AppError, type UploadResponse, type ForecastResponse } from "@/lib/api";
 
 type Step = "upload" | "configure" | "loading" | "results";
 
@@ -56,7 +56,12 @@ export default function Home() {
   const [predictionGenerationTimeMs, setPredictionGenerationTimeMs] = useState<number | null>(null);
   const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
   const [lastEventTime, setLastEventTime] = useState<number | null>(null);
+  const [appVersion, setAppVersion] = useState("1.3");
   const smoothProgress = useSmoothedProgress(progress?.pct ?? 0);
+
+  useEffect(() => {
+    fetchAppVersion().then(setAppVersion);
+  }, []);
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
@@ -246,6 +251,7 @@ export default function Home() {
                   dataProcessing: dataProcessingTimeMs,
                   predictionGeneration: predictionGenerationTimeMs,
                 }}
+                appVersion={appVersion}
               />
             </div>
             <ForecastResults

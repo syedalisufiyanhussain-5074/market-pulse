@@ -1,10 +1,12 @@
 import io
 import json
 import threading
+from datetime import datetime
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
+from app.config import APP_VERSION
 from app.schemas.responses import ForecastResponse
 from app.schemas.requests import PDFExportRequest, ExcelExportRequest
 from app.services.excel_export import generate_excel
@@ -264,7 +266,7 @@ async def export_pdf(request: PDFExportRequest):
     return Response(
         content=bytes(pdf_bytes),
         media_type="application/pdf",
-        headers={"Content-Disposition": "attachment; filename=market-pulse-report.pdf"},
+        headers={"Content-Disposition": f"attachment; filename=MarketPulse_{datetime.now().strftime('%Y%m%d')}_V{APP_VERSION}_Report.pdf"},
     )
 
 
@@ -280,5 +282,5 @@ async def export_excel(request: ExcelExportRequest):
     return Response(
         content=excel_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": "attachment; filename=market-pulse-forecast.xlsx"},
+        headers={"Content-Disposition": f"attachment; filename=MarketPulse_{datetime.now().strftime('%Y%m%d')}_V{APP_VERSION}_Report.xlsx"},
     )

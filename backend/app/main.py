@@ -1,12 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import APP_VERSION
 from app.routers import upload, forecast
 
 app = FastAPI(
     title="Market Pulse",
     description="Smart forecasting engine for sellers",
-    version="1.0.0",
+    version=APP_VERSION,
 )
 
 app.add_middleware(
@@ -24,4 +25,4 @@ app.include_router(forecast.router)
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "service": "market-pulse"}
+    return {"status": "healthy", "service": "market-pulse", "version": APP_VERSION}
