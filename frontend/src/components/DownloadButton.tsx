@@ -9,18 +9,16 @@ interface DownloadButtonProps {
   data: ForecastResponse;
   timingMs?: { dataProcessing: number | null; predictionGeneration: number | null };
   appVersion?: string;
+  reportNumber?: number | null;
 }
 
-function generateFilename(ext: string, appVersion: string): string {
+function generateFilename(ext: string, appVersion: string, reportNumber: number): string {
   const now = new Date();
   const date = `${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${now.getFullYear()}`;
-  const key = `mp_reports_${date}`;
-  const count = parseInt(localStorage.getItem(key) ?? "0", 10) + 1;
-  localStorage.setItem(key, String(count));
-  return `MarketPulse_${date}_V${appVersion}_Report_${count}.${ext}`;
+  return `MarketPulse_${date}_V${appVersion}_Report_${reportNumber}.${ext}`;
 }
 
-export default function DownloadButton({ data, timingMs, appVersion = "1.3" }: DownloadButtonProps) {
+export default function DownloadButton({ data, timingMs, appVersion = "1.3", reportNumber }: DownloadButtonProps) {
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
 
@@ -31,7 +29,7 @@ export default function DownloadButton({ data, timingMs, appVersion = "1.3" }: D
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = generateFilename("pdf", appVersion);
+      a.download = generateFilename("pdf", appVersion, reportNumber ?? 1);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -50,7 +48,7 @@ export default function DownloadButton({ data, timingMs, appVersion = "1.3" }: D
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = generateFilename("xlsx", appVersion);
+      a.download = generateFilename("xlsx", appVersion, reportNumber ?? 1);
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

@@ -57,6 +57,7 @@ export default function Home() {
   const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
   const [lastEventTime, setLastEventTime] = useState<number | null>(null);
   const [appVersion, setAppVersion] = useState("1.3");
+  const [reportNumber, setReportNumber] = useState<number | null>(null);
   const smoothProgress = useSmoothedProgress(progress?.pct ?? 0);
 
   useEffect(() => {
@@ -113,6 +114,13 @@ export default function Home() {
       setForecastData(data);
       setStep("results");
       setPredictionGenerationTimeMs(Math.max(0, Math.round(performance.now() - t0)));
+      // Increment daily report counter once per prediction run
+      const now = new Date();
+      const dateKey = `${String(now.getDate()).padStart(2, "0")}${String(now.getMonth() + 1).padStart(2, "0")}${now.getFullYear()}`;
+      const key = `mp_reports_${dateKey}`;
+      const count = parseInt(localStorage.getItem(key) ?? "0", 10) + 1;
+      localStorage.setItem(key, String(count));
+      setReportNumber(count);
     } catch (err) {
       setPredictionGenerationTimeMs(Math.max(0, Math.round(performance.now() - t0)));
       const message = err instanceof Error ? err.message : "Forecast failed";
@@ -142,6 +150,7 @@ export default function Home() {
     setProgress(null);
     setLastEventTime(null);
     setUploadStatus(null);
+    setReportNumber(null);
   };
 
   // Map internal model names to display names
@@ -252,6 +261,7 @@ export default function Home() {
                   predictionGeneration: predictionGenerationTimeMs,
                 }}
                 appVersion={appVersion}
+                reportNumber={reportNumber}
               />
             </div>
             <ForecastResults
