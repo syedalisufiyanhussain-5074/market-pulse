@@ -24,28 +24,28 @@ export default function ForecastResults({ data, displayModel, timingMs }: Foreca
       <div className="grid grid-cols-3 gap-4">
         <MetricCard label="Selected Model" value={modelDisplay} />
         <MetricCard
-          label="MAE"
+          label="Model Accuracy"
           value={data.mae_value.toLocaleString(undefined, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
           })}
         />
-        <MetricCard label="Forecast Horizon" value={`${data.forecast_horizon} periods`} />
+        <MetricCard label="Forecast Window" value={`${data.forecast_horizon} periods`} />
       </div>
 
       {/* Timing metrics */}
       {timingMs && (timingMs.dataProcessing != null || timingMs.predictionGeneration != null) && (
         <div className="grid grid-cols-3 gap-4">
           <MetricCard
-            label="Data Processing"
+            label="Preparing Data"
             value={timingMs.dataProcessing != null ? formatTime(timingMs.dataProcessing) : "\u2014"}
           />
           <MetricCard
-            label="Prediction Generation"
+            label="Generating Forecast"
             value={timingMs.predictionGeneration != null ? formatTime(timingMs.predictionGeneration) : "\u2014"}
           />
           <MetricCard
-            label="End-to-End"
+            label="Complete Flow"
             value={
               timingMs.dataProcessing != null && timingMs.predictionGeneration != null
                 ? formatTime(timingMs.dataProcessing + timingMs.predictionGeneration)
