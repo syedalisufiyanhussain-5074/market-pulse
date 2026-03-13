@@ -18,6 +18,8 @@ class PDFExportRequest(BaseModel):
     chart2_base64: str
     forecast_data: list[dict]
     metrics: dict
+    data_processing_ms: float | None = None
+    prediction_generation_ms: float | None = None
 
 
 class ExcelExportRequest(BaseModel):

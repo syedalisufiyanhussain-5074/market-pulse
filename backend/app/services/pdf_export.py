@@ -97,6 +97,15 @@ class MarketPulsePDF(FPDF):
         self.cell(0, 8, f"Generated on {timestamp}", align="R")
 
 
+def _format_time(ms: float) -> str:
+    """Format milliseconds to human-readable duration, matching frontend formatTime."""
+    if ms >= 60_000:
+        return f"{ms / 60_000:.1f} mins"
+    if ms >= 1000:
+        return f"{ms / 1000:.1f} secs"
+    return f"{int(ms)} ms"
+
+
 def generate_pdf(
     selected_model: str,
     mae_value: float,
@@ -106,6 +115,8 @@ def generate_pdf(
     chart1_base64: str,
     chart2_base64: str,
     metrics: dict | None = None,
+    data_processing_ms: float | None = None,
+    prediction_generation_ms: float | None = None,
     file_hash: str = "",
 ) -> bytes:
     with log_stage(logger, "pdf_export", file_hash=file_hash):
@@ -133,7 +144,7 @@ def generate_pdf(
         pdf.cell(0, 8, "Forecast Report", align="C", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(8)
 
-        # Three report details — matching dashboard tile labels
+        # Row 1: forecast details — matching dashboard tile labels
         _add_info_row(pdf, "Selected Model", selected_display)
         smape = None
         if metrics and selected_model in metrics:
@@ -141,6 +152,16 @@ def generate_pdf(
         accuracy_value = f"{mae_value:,.2f} pts (~{smape:.1f}%)" if smape is not None else f"{mae_value:,.2f} pts"
         _add_info_row(pdf, "Model Accuracy", accuracy_value)
         _add_info_row(pdf, "Forecast Window", f"{forecast_horizon} periods")
+
+        # Row 2: timing details
+        if data_processing_ms is not None or prediction_generation_ms is not None:
+            pdf.ln(2)
+            _add_info_row(pdf, "Preparing Data", _format_time(data_processing_ms) if data_processing_ms is not None else "--")
+            _add_info_row(pdf, "Generating Forecast", _format_time(prediction_generation_ms) if prediction_generation_ms is not None else "--")
+            if data_processing_ms is not None and prediction_generation_ms is not None:
+                _add_info_row(pdf, "Complete Flow", _format_time(data_processing_ms + prediction_generation_ms))
+            else:
+                _add_info_row(pdf, "Complete Flow", "--")
         pdf.ln(6)
 
         # Graph 1 header

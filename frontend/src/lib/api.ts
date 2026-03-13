@@ -219,7 +219,10 @@ export async function runForecastStream(
   throw new AppError("Something went wrong — no results were received. Please try again.", "STREAM_ERROR");
 }
 
-export async function exportPDF(data: ForecastResponse): Promise<Blob> {
+export async function exportPDF(
+  data: ForecastResponse,
+  timingMs?: { dataProcessing: number | null; predictionGeneration: number | null },
+): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/export/pdf`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -233,6 +236,8 @@ export async function exportPDF(data: ForecastResponse): Promise<Blob> {
       chart2_base64: data.chart2_base64,
       forecast_data: data.forecast_data,
       metrics: data.metrics,
+      data_processing_ms: timingMs?.dataProcessing ?? null,
+      prediction_generation_ms: timingMs?.predictionGeneration ?? null,
     }),
   });
 

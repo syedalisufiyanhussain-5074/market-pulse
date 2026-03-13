@@ -7,16 +7,17 @@ import { exportPDF, exportExcel, type ForecastResponse } from "@/lib/api";
 
 interface DownloadButtonProps {
   data: ForecastResponse;
+  timingMs?: { dataProcessing: number | null; predictionGeneration: number | null };
 }
 
-export default function DownloadButton({ data }: DownloadButtonProps) {
+export default function DownloadButton({ data, timingMs }: DownloadButtonProps) {
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
 
   const handleDownloadPDF = async () => {
     setIsExportingPDF(true);
     try {
-      const blob = await exportPDF(data);
+      const blob = await exportPDF(data, timingMs);
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;

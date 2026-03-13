@@ -240,7 +240,13 @@ export default function Home() {
                   Analysis complete. Review your forecast below.
                 </p>
               </div>
-              <DownloadButton data={forecastData} />
+              <DownloadButton
+                data={forecastData}
+                timingMs={{
+                  dataProcessing: dataProcessingTimeMs,
+                  predictionGeneration: predictionGenerationTimeMs,
+                }}
+              />
             </div>
             <ForecastResults
               data={forecastData}

@@ -257,6 +257,8 @@ async def export_pdf(request: PDFExportRequest):
         chart1_base64=request.chart1_base64,
         chart2_base64=request.chart2_base64,
         metrics=request.metrics,
+        data_processing_ms=request.data_processing_ms,
+        prediction_generation_ms=request.prediction_generation_ms,
     )
 
     return Response(
