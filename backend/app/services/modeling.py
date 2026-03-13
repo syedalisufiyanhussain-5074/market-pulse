@@ -13,6 +13,79 @@ ETS_TREND_OPTIONS = ["add", "mul", None]
 ETS_SEASONAL_OPTIONS = ["add", "mul", None]
 
 
+def _calc_n_windows(y_len: int) -> int:
+    max_windows = 3 if y_len > 200 else 5
+    n_windows = min(max_windows, y_len // 3)
+    return max(1, n_windows)
+
+
+def fit_ets(
+    df: pd.DataFrame,
+    seasonal_period: int | None,
+    forecast_horizon: int,
+    file_hash: str = "",
+) -> tuple:
+    """Fit ETS model and return (cv_results, forecast, conf_intervals)."""
+    with log_stage(logger, "ets_fitting", file_hash=file_hash):
+        y = df["y"].values
+        n_windows = _calc_n_windows(len(y))
+        return _fit_auto_ets(y, seasonal_period, forecast_horizon, n_windows)
+
+
+def fit_arima(
+    df: pd.DataFrame,
+    seasonal_period: int | None,
+    forecast_horizon: int,
+    file_hash: str = "",
+) -> tuple:
+    """Fit ARIMA model and return (cv_results, forecast, conf_intervals)."""
+    with log_stage(logger, "arima_fitting", file_hash=file_hash):
+        y = df["y"].values
+        n_windows = _calc_n_windows(len(y))
+        return _fit_auto_sarima(y, seasonal_period, forecast_horizon, n_windows)
+
+
+def build_forecast_df(
+    df: pd.DataFrame,
+    freq: str,
+    forecast_horizon: int,
+    ets_result: tuple,
+    arima_result: tuple,
+    file_hash: str = "",
+) -> dict:
+    """Combine ETS + ARIMA results into forecasts DataFrame + cv_results."""
+    ets_cv, ets_forecast, ets_conf = ets_result
+    arima_cv, arima_forecast, arima_conf = arima_result
+
+    dates = df["ds"].values
+    last_date = pd.Timestamp(dates[-1])
+    forecast_dates = pd.date_range(
+        start=last_date, periods=forecast_horizon + 1, freq=freq
+    )[1:]
+
+    forecasts = pd.DataFrame({
+        "ds": forecast_dates,
+        "AutoETS": ets_forecast,
+        "AutoETS-lo-80": ets_conf[0],
+        "AutoETS-hi-80": ets_conf[1],
+        "AutoARIMA": arima_forecast,
+        "AutoARIMA-lo-80": arima_conf[0],
+        "AutoARIMA-hi-80": arima_conf[1],
+    })
+
+    cv_results = _build_cv_results(ets_cv, arima_cv)
+
+    logger.info(
+        f"Models fitted. Forecast horizon: {forecast_horizon}",
+        extra={"file_hash": file_hash},
+    )
+
+    return {
+        "forecasts": forecasts,
+        "cv_results": cv_results,
+    }
+
+
 def run_models(
     df: pd.DataFrame,
     freq: str,
@@ -20,50 +93,11 @@ def run_models(
     forecast_horizon: int,
     file_hash: str = "",
 ) -> dict:
+    """Convenience wrapper that fits both models and builds results."""
     with log_stage(logger, "modeling", file_hash=file_hash, row_count=len(df)):
-        y = df["y"].values
-        dates = df["ds"].values
-
-        # Adaptive CV: fewer windows for larger datasets
-        max_windows = 3 if len(y) > 200 else 5
-        n_windows = min(max_windows, len(y) // 3)
-        n_windows = max(1, n_windows)
-
-        ets_cv, ets_forecast, ets_conf = _fit_auto_ets(
-            y, seasonal_period, forecast_horizon, n_windows
-        )
-        arima_cv, arima_forecast, arima_conf = _fit_auto_sarima(
-            y, seasonal_period, forecast_horizon, n_windows
-        )
-
-        # Build forecast DataFrame
-        last_date = pd.Timestamp(dates[-1])
-        forecast_dates = pd.date_range(
-            start=last_date, periods=forecast_horizon + 1, freq=freq
-        )[1:]
-
-        forecasts = pd.DataFrame({
-            "ds": forecast_dates,
-            "AutoETS": ets_forecast,
-            "AutoETS-lo-80": ets_conf[0],
-            "AutoETS-hi-80": ets_conf[1],
-            "AutoARIMA": arima_forecast,
-            "AutoARIMA-lo-80": arima_conf[0],
-            "AutoARIMA-hi-80": arima_conf[1],
-        })
-
-        # Build CV results DataFrame
-        cv_results = _build_cv_results(ets_cv, arima_cv)
-
-        logger.info(
-            f"Models fitted. Forecast horizon: {forecast_horizon}, CV windows: {n_windows}",
-            extra={"file_hash": file_hash},
-        )
-
-        return {
-            "forecasts": forecasts,
-            "cv_results": cv_results,
-        }
+        ets_result = fit_ets(df, seasonal_period, forecast_horizon, file_hash)
+        arima_result = fit_arima(df, seasonal_period, forecast_horizon, file_hash)
+        return build_forecast_df(df, freq, forecast_horizon, ets_result, arima_result, file_hash)
 
 
 def _fit_auto_ets(

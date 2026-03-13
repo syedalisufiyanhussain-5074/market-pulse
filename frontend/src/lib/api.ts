@@ -40,10 +40,24 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   const formData = new FormData();
   formData.append("file", file);
 
-  const res = await fetch(`${API_BASE}/api/upload`, {
-    method: "POST",
-    body: formData,
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 90_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/upload`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(timeoutId);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new AppError("Request timed out. The server may be starting up — please try again in a few seconds.");
+    }
+    throw new AppError("Unable to reach the server. Please check your connection and try again.");
+  }
+  clearTimeout(timeoutId);
 
   if (!res.ok) {
     const error = await res.json();
@@ -66,8 +80,8 @@ export async function runForecast(
   formData.append("preference", preference);
 
   const controller = new AbortController();
-  // Render free tier has ~30s hard limit; 90s is a client-side safety net
-  const timeoutId = setTimeout(() => controller.abort(), 90_000);
+  // 120s absolute timeout for non-streaming endpoint
+  const timeoutId = setTimeout(() => controller.abort(), 120_000);
 
   let res: Response;
   try {
@@ -81,7 +95,7 @@ export async function runForecast(
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new AppError("Request timed out. The dataset may be too large — try fewer rows or coarser time granularity.");
     }
-    throw err;
+    throw new AppError("Unable to reach the server. Please check your connection and try again.");
   }
   clearTimeout(timeoutId);
 
@@ -107,8 +121,9 @@ export async function runForecastStream(
   formData.append("preference", preference);
 
   const controller = new AbortController();
-  // Render free tier has ~30s hard limit; 90s is a client-side safety net
-  const timeoutId = setTimeout(() => controller.abort(), 90_000);
+
+  // Phase 1: Connection timeout (90s) — covers Render cold start
+  const connectTimeout = setTimeout(() => controller.abort(), 90_000);
 
   let res: Response;
   try {
@@ -118,46 +133,75 @@ export async function runForecastStream(
       signal: controller.signal,
     });
   } catch (err: unknown) {
-    clearTimeout(timeoutId);
+    clearTimeout(connectTimeout);
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new AppError("Request timed out. The dataset may be too large — try fewer rows or coarser time granularity.");
+      throw new AppError("Request timed out. The server may be starting up — please try again in a few seconds.");
     }
-    throw err;
+    throw new AppError("Unable to reach the server. Please check your connection and try again.");
   }
-  clearTimeout(timeoutId);
+  clearTimeout(connectTimeout);
 
   if (!res.body) {
     throw new AppError("Stream not supported by browser", "STREAM_ERROR");
   }
 
+  // Phase 2: Idle timeout (45s) — reset on every chunk received
+  const IDLE_MS = 45_000;
+  let idleTimer = setTimeout(() => controller.abort(), IDLE_MS);
+
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
+  try {
+    while (true) {
+      let readResult: ReadableStreamReadResult<Uint8Array>;
+      try {
+        readResult = await reader.read();
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          throw new AppError("Connection idle too long — the server may have stalled. Please try again.");
+        }
+        throw new AppError("Stream connection lost. Please try again.");
+      }
 
-    const events = buffer.split("\n\n");
-    buffer = events.pop()!;
+      const { done, value } = readResult;
+      if (done) break;
 
-    for (const raw of events) {
-      const eventMatch = raw.match(/^event: (.+)$/m);
-      const dataMatch = raw.match(/^data: (.+)$/m);
-      if (!eventMatch || !dataMatch) continue;
+      // Reset idle timer on every chunk
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => controller.abort(), IDLE_MS);
 
-      const type = eventMatch[1];
-      const data = JSON.parse(dataMatch[1]);
+      buffer += decoder.decode(value, { stream: true });
 
-      if (type === "progress") {
-        onProgress(data.progress, data.message);
-      } else if (type === "complete") {
-        return data as ForecastResponse;
-      } else if (type === "error") {
-        throw new AppError(data.message || "Forecast failed", data.error_code);
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const raw of parts) {
+        const eventMatch = raw.match(/^event: (.+)$/m);
+        const dataMatch = raw.match(/^data: (.+)$/m);
+
+        // Heartbeat events have no data — just reset idle timer (already done above)
+        if (!eventMatch || !dataMatch) continue;
+
+        const type = eventMatch[1];
+        if (type === "heartbeat") continue;
+
+        const data = JSON.parse(dataMatch[1]);
+
+        if (type === "progress") {
+          onProgress(data.progress, data.message);
+        } else if (type === "complete") {
+          clearTimeout(idleTimer);
+          return data as ForecastResponse;
+        } else if (type === "error") {
+          clearTimeout(idleTimer);
+          throw new AppError(data.message || "Forecast failed", data.error_code);
+        }
       }
     }
+  } finally {
+    clearTimeout(idleTimer);
   }
 
   throw new AppError("Stream ended without result", "STREAM_ERROR");

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,35 @@ type Step = "upload" | "configure" | "loading" | "results";
 
 const DATA_QUALITY_CODES = ["INSUFFICIENT_PERIODS", "EXCESSIVE_MISSING", "NO_VALID_VALUES"];
 
+function useSmoothedProgress(target: number): number {
+  const [display, setDisplay] = useState(0);
+  const ref = useRef(0);
+
+  useEffect(() => {
+    if (target < ref.current) {
+      ref.current = target;
+      setDisplay(target);
+      return;
+    }
+    let raf: number;
+    const animate = () => {
+      const diff = target - ref.current;
+      if (Math.abs(diff) < 0.5) {
+        ref.current = target;
+        setDisplay(target);
+        return;
+      }
+      ref.current = Math.min(target, ref.current + diff * 0.08);
+      setDisplay(Math.round(ref.current));
+      raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, [target]);
+
+  return display;
+}
+
 export default function Home() {
   const [step, setStep] = useState<Step>("upload");
   const [file, setFile] = useState<File | null>(null);
@@ -25,6 +54,8 @@ export default function Home() {
   const [dataProcessingTimeMs, setDataProcessingTimeMs] = useState<number | null>(null);
   const [predictionGenerationTimeMs, setPredictionGenerationTimeMs] = useState<number | null>(null);
   const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
+  const [lastEventTime, setLastEventTime] = useState<number | null>(null);
+  const smoothProgress = useSmoothedProgress(progress?.pct ?? 0);
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile);
@@ -62,12 +93,13 @@ export default function Home() {
     setError(null);
     setStep("loading");
     setProgress(null);
+    setLastEventTime(null);
     const t0 = performance.now();
 
     try {
       const data = await runForecastStream(
         file, dateColumn, targetColumn, preference,
-        (pct, message) => setProgress({ pct, message }),
+        (pct, message) => { setProgress({ pct, message }); setLastEventTime(Date.now()); },
       );
       setForecastData(data);
       setStep("results");
@@ -99,6 +131,7 @@ export default function Home() {
     setDataProcessingTimeMs(null);
     setPredictionGenerationTimeMs(null);
     setProgress(null);
+    setLastEventTime(null);
   };
 
   // Map internal model names to display names
@@ -183,8 +216,9 @@ export default function Home() {
         {/* Step: Loading */}
         {step === "loading" && (
           <LoadingState
-            progress={progress?.pct ?? 0}
+            progress={smoothProgress}
             message={progress?.message ?? "Starting..."}
+            lastEventTime={lastEventTime}
           />
         )}
 

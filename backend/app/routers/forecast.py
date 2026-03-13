@@ -10,7 +10,7 @@ from app.services.excel_export import generate_excel
 from app.services.file_parser import parse_upload, parse_from_bytes
 from app.services.validator import validate_data
 from app.services.data_prep import prepare_data
-from app.services.modeling import run_models
+from app.services.modeling import run_models, fit_ets, fit_arima, build_forecast_df
 from app.services.evaluation import evaluate_models
 from app.services.decision import select_best_model
 from app.services.visualization import generate_charts
@@ -139,12 +139,15 @@ async def run_forecast_stream(
 
     def generate():
         try:
+            yield _sse("heartbeat")
             yield _sse("progress", progress=5, message="Reading file...")
             df, file_hash = parse_from_bytes(contents, filename)
 
+            yield _sse("heartbeat")
             yield _sse("progress", progress=15, message="Validating data...")
             parsed = validate_data(df, date_column, target_column, file_hash=file_hash)
 
+            yield _sse("heartbeat")
             yield _sse("progress", progress=25, message="Preparing data...")
             prep_result = prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed)
             prepared_df = prep_result["df"]
@@ -152,12 +155,20 @@ async def run_forecast_stream(
             seasonal_period = prep_result["seasonal_period"]
             forecast_horizon = prep_result["forecast_horizon"]
 
-            yield _sse("progress", progress=40, message="Running ETS model...")
-            model_result = run_models(
-                prepared_df, freq, seasonal_period, forecast_horizon, file_hash=file_hash
-            )
+            yield _sse("heartbeat")
+            yield _sse("progress", progress=35, message="Fitting ETS model...")
+            ets_result = fit_ets(prepared_df, seasonal_period, forecast_horizon, file_hash=file_hash)
 
-            yield _sse("progress", progress=75, message="Evaluating models...")
+            yield _sse("heartbeat")
+            yield _sse("progress", progress=55, message="Fitting ARIMA model...")
+            arima_result = fit_arima(prepared_df, seasonal_period, forecast_horizon, file_hash=file_hash)
+
+            yield _sse("heartbeat")
+            yield _sse("progress", progress=68, message="Building forecasts...")
+            model_result = build_forecast_df(prepared_df, freq, forecast_horizon, ets_result, arima_result, file_hash=file_hash)
+
+            yield _sse("heartbeat")
+            yield _sse("progress", progress=78, message="Evaluating models...")
             metrics, excel_ets_forecast = evaluate_models(
                 model_result["cv_results"],
                 prepared_df,
@@ -165,9 +176,11 @@ async def run_forecast_stream(
                 file_hash=file_hash,
             )
 
+            yield _sse("heartbeat")
             yield _sse("progress", progress=85, message="Selecting best model...")
             decision = select_best_model(metrics, preference, file_hash=file_hash)
 
+            yield _sse("heartbeat")
             yield _sse("progress", progress=92, message="Generating charts...")
             charts = generate_charts(
                 historical_df=prepared_df,
