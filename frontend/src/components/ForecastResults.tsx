@@ -12,7 +12,14 @@ interface ForecastResultsProps {
 }
 
 function formatTime(ms: number): string {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+  if (ms >= 60_000) {
+    const mins = ms / 60_000;
+    return `${mins.toFixed(1)} mins`;
+  }
+  if (ms >= 1000) {
+    return `${(ms / 1000).toFixed(1)} secs`;
+  }
+  return `${ms} ms`;
 }
 
 export default function ForecastResults({ data, displayModel, timingMs }: ForecastResultsProps) {
@@ -25,10 +32,10 @@ export default function ForecastResults({ data, displayModel, timingMs }: Foreca
         <MetricCard label="Selected Model" value={modelDisplay} />
         <MetricCard
           label="Model Accuracy"
-          value={`Deviation: ${data.mae_value.toLocaleString(undefined, {
+          value={`${data.mae_value.toLocaleString(undefined, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
-          })} points`}
+          })} points (~${data.metrics[data.selected_model]?.smape.toFixed(1) ?? "?"}%)`}
         />
         <MetricCard label="Forecast Window" value={`${data.forecast_horizon} periods`} />
       </div>
