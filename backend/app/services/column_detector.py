@@ -37,6 +37,12 @@ def detect_columns(df: pd.DataFrame, file_hash: str = "") -> dict:
 def _is_date_column(series: pd.Series) -> bool:
     if pd.api.types.is_datetime64_any_dtype(series):
         return True
+    # Don't auto-detect numeric columns as dates — avoids misclassifying
+    # values in the 1900-2100 range (e.g., inventory counts, prices).
+    # Year-only columns are still parsed correctly when the user selects
+    # them as the date column (validator/data_prep use parse_time_column).
+    if pd.api.types.is_numeric_dtype(series):
+        return False
     return looks_like_time_column(series)
 
 

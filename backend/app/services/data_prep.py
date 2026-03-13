@@ -176,6 +176,8 @@ def _detect_frequency(dates: pd.Series) -> dict:
 
 def _detect_seasonal_period(df: pd.DataFrame, freq_info: dict) -> int | None:
     sp = freq_info["seasonal_period"]
+    if sp is None:
+        return None
     # Need at least MIN_PERIODS_FOR_SEASONALITY rows AND 2 full seasonal cycles
     if len(df) < MIN_PERIODS_FOR_SEASONALITY or len(df) < 2 * sp:
         return None

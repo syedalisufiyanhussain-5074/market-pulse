@@ -1,5 +1,6 @@
 import io
 import json
+import threading
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
@@ -126,6 +127,28 @@ def _sse(event: str, **data) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _run_with_heartbeats(fn, interval=10):
+    """Run fn() in a background thread, yielding heartbeats while it runs."""
+    result = [None]
+    error = [None]
+
+    def worker():
+        try:
+            result[0] = fn()
+        except Exception as e:
+            error[0] = e
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    while thread.is_alive():
+        thread.join(timeout=interval)
+        if thread.is_alive():
+            yield _sse("heartbeat")
+    if error[0] is not None:
+        raise error[0]
+    yield result[0]
+
+
 @router.post("/forecast/stream")
 async def run_forecast_stream(
     file: UploadFile = File(...),
@@ -157,11 +180,25 @@ async def run_forecast_stream(
 
             yield _sse("heartbeat")
             yield _sse("progress", progress=35, message="Training forecast model 1 of 2...")
-            ets_result = fit_ets(prepared_df, seasonal_period, forecast_horizon, file_hash=file_hash)
+            ets_result = None
+            for item in _run_with_heartbeats(
+                lambda: fit_ets(prepared_df, seasonal_period, forecast_horizon, file_hash=file_hash)
+            ):
+                if isinstance(item, str):
+                    yield item
+                else:
+                    ets_result = item
 
             yield _sse("heartbeat")
             yield _sse("progress", progress=55, message="Training forecast model 2 of 2...")
-            arima_result = fit_arima(prepared_df, seasonal_period, forecast_horizon, file_hash=file_hash)
+            arima_result = None
+            for item in _run_with_heartbeats(
+                lambda: fit_arima(prepared_df, seasonal_period, forecast_horizon, file_hash=file_hash)
+            ):
+                if isinstance(item, str):
+                    yield item
+                else:
+                    arima_result = item
 
             yield _sse("heartbeat")
             yield _sse("progress", progress=68, message="Generating predictions...")
