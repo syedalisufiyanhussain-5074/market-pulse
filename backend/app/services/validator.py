@@ -55,7 +55,7 @@ def _validate_date_column(dates: pd.Series, file_hash: str) -> None:
         raise HTTPException(
             status_code=400,
             detail={
-                "message": f"The dataset requires at least {MIN_PERIODS} unique time periods for reliable forecasting. Found {unique_periods}.",
+                "message": f"Not enough data — we need at least {MIN_PERIODS} time periods for a reliable forecast. Found only {unique_periods}.",
                 "error_code": "INSUFFICIENT_PERIODS",
             },
         )
@@ -74,7 +74,7 @@ def _validate_target_column(numeric_series: pd.Series, file_hash: str) -> None:
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "The dataset contains excessive missing values. Please provide a more complete dataset for reliable forecasting.",
+                "message": "Too many missing values in your data. Fill in the gaps or use a more complete dataset.",
                 "error_code": "EXCESSIVE_MISSING",
             },
         )

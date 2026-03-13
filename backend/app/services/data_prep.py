@@ -73,7 +73,7 @@ def prepare_data(
         if prepared["y"].isna().all() or len(prepared) == 0:
             raise HTTPException(
                 status_code=400,
-                detail={"message": "After processing, no valid numeric values remain. Please check your data column.", "error_code": "NO_VALID_VALUES"},
+                detail={"message": "No valid numbers found after processing. Check that your data column contains numeric values.", "error_code": "NO_VALID_VALUES"},
             )
 
         # Detect seasonal period (after downsampling, since freq may have changed)

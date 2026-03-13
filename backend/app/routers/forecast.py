@@ -28,7 +28,7 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
     sel_model = decision["selected_model"]
     pred_col_matches = [c for c in forecasts.columns if sel_model in c and "lo" not in c and "hi" not in c]
     if not pred_col_matches:
-        raise HTTPException(status_code=500, detail={"message": "Internal error: forecast column not found", "error_code": "INTERNAL_ERROR"})
+        raise HTTPException(status_code=500, detail={"message": "Something went wrong while building the forecast. Please try again.", "error_code": "INTERNAL_ERROR"})
     pred_col = pred_col_matches[0]
     lo_col = [c for c in forecasts.columns if sel_model in c and "lo" in c]
     hi_col = [c for c in forecasts.columns if sel_model in c and "hi" in c]

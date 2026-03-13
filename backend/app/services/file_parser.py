@@ -36,19 +36,19 @@ def parse_from_bytes(contents: bytes, filename: str) -> tuple[pd.DataFrame, str]
     if len(df) == 0:
         raise HTTPException(
             status_code=400,
-            detail={"message": "The uploaded file contains no data.", "error_code": "EMPTY_FILE"},
+            detail={"message": "The file appears to be empty. Please upload a file with data.", "error_code": "EMPTY_FILE"},
         )
 
     if len(df.columns) > MAX_COLUMNS:
         raise HTTPException(
             status_code=400,
-            detail={"message": f"Dataset exceeds the maximum of {MAX_COLUMNS} columns. Please reduce the number of columns.", "error_code": "TOO_MANY_COLUMNS"},
+            detail={"message": f"Too many columns (max {MAX_COLUMNS}). Remove extra columns and try again.", "error_code": "TOO_MANY_COLUMNS"},
         )
 
     if len(df) > MAX_ROWS:
         raise HTTPException(
             status_code=400,
-            detail={"message": f"Dataset exceeds the maximum of {MAX_ROWS:,} rows. Please reduce the dataset size.", "error_code": "TOO_MANY_ROWS"},
+            detail={"message": f"Too many rows (max {MAX_ROWS:,}). Trim your dataset and try again.", "error_code": "TOO_MANY_ROWS"},
         )
 
     logger.info(
@@ -70,7 +70,7 @@ async def parse_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
     if file.size and file.size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=400,
-            detail={"message": f"File exceeds the maximum size of {MAX_FILE_SIZE // (1024 * 1024)}MB. Please reduce the file size.", "error_code": "FILE_TOO_LARGE"},
+            detail={"message": "File is too large (max 10 MB). Try a smaller file.", "error_code": "FILE_TOO_LARGE"},
         )
 
     contents = await file.read()
@@ -79,7 +79,7 @@ async def parse_upload(file: UploadFile) -> tuple[pd.DataFrame, str]:
     if len(contents) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=400,
-            detail={"message": f"File exceeds the maximum size of {MAX_FILE_SIZE // (1024 * 1024)}MB. Please reduce the file size.", "error_code": "FILE_TOO_LARGE"},
+            detail={"message": "File is too large (max 10 MB). Try a smaller file.", "error_code": "FILE_TOO_LARGE"},
         )
 
     return parse_from_bytes(contents, file.filename or "")

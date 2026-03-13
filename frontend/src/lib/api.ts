@@ -61,7 +61,7 @@ export async function uploadFile(file: File): Promise<UploadResponse> {
   } catch (err: unknown) {
     clearTimeout(timeoutId);
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new AppError("Request timed out. The server may be starting up — please try again in a few seconds.");
+      throw new AppError("The server is waking up — this can take up to a minute on the first visit. Please try again.");
     }
     throw new AppError("Unable to reach the server. Please check your connection and try again.");
   }
@@ -147,14 +147,14 @@ export async function runForecastStream(
   } catch (err: unknown) {
     clearTimeout(connectTimeout);
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new AppError("Request timed out. The server may be starting up — please try again in a few seconds.");
+      throw new AppError("The server is waking up — this can take up to a minute on the first visit. Please try again.");
     }
     throw new AppError("Unable to reach the server. Please check your connection and try again.");
   }
   clearTimeout(connectTimeout);
 
   if (!res.body) {
-    throw new AppError("Stream not supported by browser", "STREAM_ERROR");
+    throw new AppError("Your browser doesn't support live updates. Please try Chrome, Edge, or Firefox.", "STREAM_ERROR");
   }
 
   // Phase 2: Idle timeout (45s) — reset on every chunk received
@@ -172,9 +172,9 @@ export async function runForecastStream(
         readResult = await reader.read();
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === "AbortError") {
-          throw new AppError("Connection idle too long — the server may have stalled. Please try again.");
+          throw new AppError("The server took too long to respond. Please try again — it usually works on the second attempt.");
         }
-        throw new AppError("Stream connection lost. Please try again.");
+        throw new AppError("Connection interrupted. Please try again.");
       }
 
       const { done, value } = readResult;
@@ -216,7 +216,7 @@ export async function runForecastStream(
     clearTimeout(idleTimer);
   }
 
-  throw new AppError("Stream ended without result", "STREAM_ERROR");
+  throw new AppError("Something went wrong — no results were received. Please try again.", "STREAM_ERROR");
 }
 
 export async function exportPDF(data: ForecastResponse): Promise<Blob> {
@@ -237,7 +237,7 @@ export async function exportPDF(data: ForecastResponse): Promise<Blob> {
   });
 
   if (!res.ok) {
-    throw new Error("PDF export failed");
+    throw new Error("Unable to generate PDF. Please try again.");
   }
 
   return res.blob();
@@ -256,7 +256,7 @@ export async function exportExcel(data: ForecastResponse): Promise<Blob> {
   });
 
   if (!res.ok) {
-    throw new Error("Excel export failed");
+    throw new Error("Unable to generate Excel file. Please try again.");
   }
 
   return res.blob();

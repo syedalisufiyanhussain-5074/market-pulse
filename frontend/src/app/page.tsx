@@ -51,6 +51,7 @@ export default function Home() {
   const [forecastData, setForecastData] = useState<ForecastResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
   const [dataProcessingTimeMs, setDataProcessingTimeMs] = useState<number | null>(null);
   const [predictionGenerationTimeMs, setPredictionGenerationTimeMs] = useState<number | null>(null);
   const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
@@ -61,19 +62,21 @@ export default function Home() {
     setFile(selectedFile);
     setError(null);
     setIsUploading(true);
+    setUploadStatus("Waking up the server...");
     const t0 = performance.now();
 
     try {
       const data = await uploadFile(selectedFile);
+      setUploadStatus(null);
       setUploadData(data);
 
       if (data.date_columns.length === 0) {
-        setError("No date columns detected. Please ensure your file contains a date column.");
+        setError("We couldn't find a date column. Make sure your file has dates like 2024-01-15, Jan 2024, or Q1 2024.");
         setIsUploading(false);
         return;
       }
       if (data.numeric_columns.length === 0) {
-        setError("No numeric columns detected. Please ensure your file contains numeric data.");
+        setError("We couldn't find a numeric column. Make sure your file has a column with numbers to forecast.");
         setIsUploading(false);
         return;
       }
@@ -85,6 +88,7 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
       setIsUploading(false);
+      setUploadStatus(null);
     }
   };
 
@@ -132,6 +136,7 @@ export default function Home() {
     setPredictionGenerationTimeMs(null);
     setProgress(null);
     setLastEventTime(null);
+    setUploadStatus(null);
   };
 
   // Map internal model names to display names
@@ -189,6 +194,9 @@ export default function Home() {
               </p>
             </div>
             <FileUploader onFileSelect={handleFileSelect} isLoading={isUploading} />
+            {isUploading && uploadStatus && (
+              <p className="text-center text-white/40 text-sm animate-pulse">{uploadStatus}</p>
+            )}
           </div>
         )}
 
