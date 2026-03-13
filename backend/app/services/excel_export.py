@@ -152,14 +152,21 @@ def generate_excel(
 
         row += 1
 
-    # Auto-fit column widths
+    # Auto-fit column widths (account for number formatting)
     for col_idx in range(1, 6):
         col_letter = get_column_letter(col_idx)
         max_len = len(headers[col_idx - 1])
         for r in range(4, row):
-            val = ws.cell(row=r, column=col_idx).value
-            if val is not None:
-                max_len = max(max_len, len(str(val)))
+            cell = ws.cell(row=r, column=col_idx)
+            val = cell.value
+            if val is None or val == "":
+                continue
+            if isinstance(val, (int, float)):
+                # Format as displayed: #,##0.00
+                display_str = f"{val:,.2f}"
+            else:
+                display_str = str(val)
+            max_len = max(max_len, len(display_str))
         ws.column_dimensions[col_letter].width = max_len + 4
 
     # Write to bytes

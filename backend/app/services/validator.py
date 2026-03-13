@@ -1,6 +1,7 @@
 import pandas as pd
 from fastapi import HTTPException
 
+from app.services.time_parser import parse_time_column
 from app.utils.logger import get_logger, log_stage
 
 logger = get_logger("validator")
@@ -20,7 +21,7 @@ def validate_data(
         _validate_columns_exist(df, date_column, target_column)
 
         with log_stage(logger, "date_parsing", file_hash=file_hash):
-            parsed_dates = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
+            parsed_dates, _ = parse_time_column(df[date_column])
         _validate_date_column(parsed_dates, file_hash)
 
         with log_stage(logger, "numeric_parsing", file_hash=file_hash):

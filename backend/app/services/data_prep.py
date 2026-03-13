@@ -3,6 +3,7 @@ import numpy as np
 
 from fastapi import HTTPException
 
+from app.services.time_parser import parse_time_column
 from app.utils.logger import get_logger, log_stage
 
 logger = get_logger("data_prep")
@@ -12,6 +13,16 @@ FREQUENCY_MAP = {
     "W": {"alias": "W", "seasonal_period": 52, "label": "weekly"},
     "MS": {"alias": "MS", "seasonal_period": 12, "label": "monthly"},
     "QS": {"alias": "QS", "seasonal_period": 4, "label": "quarterly"},
+    "YS": {"alias": "YS", "seasonal_period": None, "label": "yearly"},
+}
+
+# Per-frequency forecast horizon bounds (min, max periods)
+HORIZON_BOUNDS = {
+    "D": (7, 30),
+    "W": (4, 12),
+    "MS": (3, 12),
+    "QS": (2, 8),
+    "YS": (2, 5),
 }
 
 MIN_PERIODS_FOR_SEASONALITY = 24
@@ -38,7 +49,8 @@ def prepare_data(
             prepared["ds"] = parsed_columns["parsed_dates"]
             prepared["y"] = parsed_columns["parsed_values"]
         else:
-            prepared["ds"] = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
+            parsed_dates, _ = parse_time_column(df[date_column])
+            prepared["ds"] = parsed_dates
             prepared["y"] = pd.to_numeric(df[target_column], errors="coerce")
         prepared = prepared.dropna(subset=["ds"])
 
@@ -70,13 +82,15 @@ def prepare_data(
         # Add unique_id for statsforecast
         prepared["unique_id"] = "series_1"
 
-        # Compute forecast horizon: 20% of data, clamped to [4, 12]
-        raw_horizon = max(4, min(12, round(len(prepared) * 0.20)))
+        # Compute forecast horizon: 20% of data, clamped per frequency
+        freq_alias = freq_info["alias"]
+        min_h, max_h = HORIZON_BOUNDS.get(freq_alias, (4, 12))
+        raw_horizon = max(min_h, min(max_h, round(len(prepared) * 0.20)))
         # Snap to nearest seasonal cycle if seasonality detected
         if seasonal_period and seasonal_period > 0:
             cycles = max(1, round(raw_horizon / seasonal_period))
             forecast_horizon = cycles * seasonal_period
-            forecast_horizon = max(4, min(12, forecast_horizon))
+            forecast_horizon = max(min_h, min(max_h, forecast_horizon))
         else:
             forecast_horizon = raw_horizon
 
@@ -154,8 +168,10 @@ def _detect_frequency(dates: pd.Series) -> dict:
         return FREQUENCY_MAP["W"]
     elif days <= 45:
         return FREQUENCY_MAP["MS"]
-    else:
+    elif days <= 200:
         return FREQUENCY_MAP["QS"]
+    else:
+        return FREQUENCY_MAP["YS"]
 
 
 def _detect_seasonal_period(df: pd.DataFrame, freq_info: dict) -> int | None:

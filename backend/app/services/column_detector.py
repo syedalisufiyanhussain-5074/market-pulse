@@ -1,11 +1,11 @@
 import pandas as pd
 
+from app.services.time_parser import looks_like_time_column
 from app.utils.logger import get_logger, log_stage
 
 logger = get_logger("column_detector")
 
 NUMERIC_DENSITY_THRESHOLD = 0.95
-DATE_PARSE_THRESHOLD = 0.90
 
 
 def detect_columns(df: pd.DataFrame, file_hash: str = "") -> dict:
@@ -37,16 +37,7 @@ def detect_columns(df: pd.DataFrame, file_hash: str = "") -> dict:
 def _is_date_column(series: pd.Series) -> bool:
     if pd.api.types.is_datetime64_any_dtype(series):
         return True
-
-    if pd.api.types.is_numeric_dtype(series):
-        return False
-
-    try:
-        parsed = pd.to_datetime(series, format="mixed", dayfirst=False, errors="coerce")
-        valid_ratio = parsed.notna().sum() / len(series)
-        return valid_ratio >= DATE_PARSE_THRESHOLD
-    except Exception:
-        return False
+    return looks_like_time_column(series)
 
 
 def _is_numeric_column(series: pd.Series) -> bool:
