@@ -106,7 +106,7 @@ def _generate_comparison_summary(
     def pct_change(baseline_mae: float) -> tuple[float, str]:
         if selected_mae == 0 or baseline_mae == 0 or baseline_mae == float("inf"):
             return 0.0, "N/A"
-        improvement = ((baseline_mae - selected_mae) / selected_mae) * 100
+        improvement = ((baseline_mae - selected_mae) / baseline_mae) * 100
         return improvement, f"{abs(improvement):.1f}%"
 
     ma_val, ma_pct = pct_change(ma_metrics["mae"])
