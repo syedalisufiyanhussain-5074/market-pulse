@@ -104,9 +104,9 @@ def _generate_comparison_summary(
     selected_mae = selected_metrics["mae"]
 
     def pct_change(baseline_mae: float) -> tuple[float, str]:
-        if baseline_mae == 0 or baseline_mae == float("inf"):
+        if selected_mae == 0 or baseline_mae == 0 or baseline_mae == float("inf"):
             return 0.0, "N/A"
-        improvement = ((baseline_mae - selected_mae) / baseline_mae) * 100
+        improvement = ((baseline_mae - selected_mae) / selected_mae) * 100
         return improvement, f"{abs(improvement):.1f}%"
 
     ma_val, ma_pct = pct_change(ma_metrics["mae"])
@@ -121,7 +121,7 @@ def _generate_comparison_summary(
     return (
         f"The {selected_display} model matched your historical data more accurately and "
         f"{ma_phrase} compared to Moving Average (Excel) and "
-        f"{excel_ets_pct} compared to ETS (Excel). It also {alt_verb} the alternative "
+        f"{ets_phrase} compared to ETS (Excel). It also {alt_verb} the alternative "
         f"statistical model, {alt_display}, by {alt_pct}, delivering the most consistent "
         f"results overall."
     )
