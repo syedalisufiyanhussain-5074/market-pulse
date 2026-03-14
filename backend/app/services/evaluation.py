@@ -16,16 +16,20 @@ def evaluate_models(
     file_hash: str = "",
 ) -> dict:
     with log_stage(logger, "evaluation", file_hash=file_hash):
-        actuals = cv_results["y"].values
+        # Use only the last CV window (first forecast_horizon entries) so that
+        # AutoETS/AutoARIMA are evaluated on the same test set as MA and Excel ETS
+        # (both use y[-forecast_horizon:]).  This makes MAE values comparable.
+        n = min(forecast_horizon, len(cv_results))
+        actuals = cv_results["y"].values[:n]
 
         # Evaluate AutoETS
         ets_col = [c for c in cv_results.columns if "AutoETS" in c and "lo" not in c and "hi" not in c]
-        ets_preds = cv_results[ets_col[0]].values if ets_col else np.zeros_like(actuals)
+        ets_preds = cv_results[ets_col[0]].values[:n] if ets_col else np.zeros(n)
         ets_metrics = _compute_metrics(actuals, ets_preds)
 
         # Evaluate AutoARIMA
         arima_col = [c for c in cv_results.columns if "AutoARIMA" in c and "lo" not in c and "hi" not in c]
-        arima_preds = cv_results[arima_col[0]].values if arima_col else np.zeros_like(actuals)
+        arima_preds = cv_results[arima_col[0]].values[:n] if arima_col else np.zeros(n)
         arima_metrics = _compute_metrics(actuals, arima_preds)
 
         # Compute baseline metrics from historical data

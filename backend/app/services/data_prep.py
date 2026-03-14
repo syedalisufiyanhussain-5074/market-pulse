@@ -25,7 +25,6 @@ HORIZON_BOUNDS = {
     "YS": (2, 5),
 }
 
-MIN_PERIODS_FOR_SEASONALITY = 24
 MAX_ROWS_FOR_MODELING = 150
 
 # Defines the next coarser frequency for automatic downsampling
@@ -178,7 +177,7 @@ def _detect_seasonal_period(df: pd.DataFrame, freq_info: dict) -> int | None:
     sp = freq_info["seasonal_period"]
     if sp is None:
         return None
-    # Need at least MIN_PERIODS_FOR_SEASONALITY rows AND 2 full seasonal cycles
-    if len(df) < MIN_PERIODS_FOR_SEASONALITY or len(df) < 2 * sp:
+    # Need at least 2 full seasonal cycles
+    if len(df) < 2 * sp:
         return None
     return sp
