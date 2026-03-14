@@ -18,7 +18,7 @@ function generateFilename(ext: string, appVersion: string, reportNumber: number)
   return `MarketPulse_${date}_V${appVersion}_Report_${reportNumber}.${ext}`;
 }
 
-export default function DownloadButton({ data, timingMs, appVersion = "1.3", reportNumber }: DownloadButtonProps) {
+export default function DownloadButton({ data, timingMs, appVersion = "1.4", reportNumber }: DownloadButtonProps) {
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
 

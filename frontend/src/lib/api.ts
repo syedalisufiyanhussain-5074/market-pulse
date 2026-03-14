@@ -21,10 +21,10 @@ export async function fetchAppVersion(): Promise<string> {
     const res = await fetch(`${API_BASE}/health`, { signal: AbortSignal.timeout(5_000) });
     if (res.ok) {
       const data = await res.json();
-      return data.version ?? "1.3";
+      return data.version ?? "1.4";
     }
   } catch { /* fallback */ }
-  return "1.3";
+  return "1.4";
 }
 
 export class AppError extends Error {

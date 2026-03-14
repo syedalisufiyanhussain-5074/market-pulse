@@ -56,7 +56,7 @@ export default function Home() {
   const [predictionGenerationTimeMs, setPredictionGenerationTimeMs] = useState<number | null>(null);
   const [progress, setProgress] = useState<{ pct: number; message: string } | null>(null);
   const [lastEventTime, setLastEventTime] = useState<number | null>(null);
-  const [appVersion, setAppVersion] = useState("1.3");
+  const [appVersion, setAppVersion] = useState("1.4");
   const [reportNumber, setReportNumber] = useState<number | null>(null);
   const smoothProgress = useSmoothedProgress(progress?.pct ?? 0);
 
