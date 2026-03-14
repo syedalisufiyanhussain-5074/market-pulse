@@ -93,6 +93,20 @@ def _generate_selected_summary(mae: float, smape: float) -> str:
     )
 
 
+def update_comparison_summary(
+    decision: dict, metrics: dict, forecast_deviation_pct: dict
+) -> None:
+    """Re-generate summary2 using Forecast Deviation % from final forecasts."""
+    selected_display = DISPLAY_NAMES.get(decision["selected_model"], decision["selected_model"])
+    alt_display = DISPLAY_NAMES.get(decision["alternative_model"], decision["alternative_model"])
+    decision["summary2"] = _generate_comparison_summary(
+        selected_display, decision["selected_metrics"],
+        alt_display, decision["alternative_metrics"],
+        metrics["Moving Average (Excel)"], metrics["ETS (Excel)"],
+        forecast_deviation_pct=forecast_deviation_pct,
+    )
+
+
 def _generate_comparison_summary(
     selected_display: str,
     selected_metrics: dict,
@@ -100,25 +114,36 @@ def _generate_comparison_summary(
     alt_metrics: dict,
     ma_metrics: dict,
     excel_ets_metrics: dict,
+    forecast_deviation_pct: dict | None = None,
 ) -> str:
-    selected_mae = selected_metrics["mae"]
+    if forecast_deviation_pct:
+        # Forecast Deviation %: divergence from primary model's forecast
+        alt_internal = "AutoARIMA" if selected_display == "ETS" else "AutoETS"
+        alt_pct_val = forecast_deviation_pct.get(alt_internal, 0.0)
+        ma_pct_val = forecast_deviation_pct.get("Moving Average (Excel)", 0.0)
+        ets_pct_val = forecast_deviation_pct.get("ETS (Excel)", 0.0)
+        alt_pct = f"{alt_pct_val:.1f}%"
+        ma_pct = f"{ma_pct_val:.1f}%"
+        excel_ets_pct = f"{ets_pct_val:.1f}%"
+    else:
+        # Fallback: CV-based MAE comparison
+        selected_mae = selected_metrics["mae"]
 
-    def pct_change(baseline_mae: float) -> tuple[float, str]:
-        if selected_mae == 0 and baseline_mae == 0:
-            return 0.0, "0.0%"  # Both models are perfect
-        if baseline_mae == 0 or baseline_mae == float("inf"):
-            return 0.0, "N/A"
-        improvement = ((baseline_mae - selected_mae) / baseline_mae) * 100
-        return improvement, f"{abs(improvement):.1f}%"
+        def pct_change(baseline_mae: float) -> tuple[float, str]:
+            if selected_mae == 0 and baseline_mae == 0:
+                return 0.0, "0.0%"
+            if baseline_mae == 0 or baseline_mae == float("inf"):
+                return 0.0, "N/A"
+            improvement = ((baseline_mae - selected_mae) / baseline_mae) * 100
+            return improvement, f"{abs(improvement):.1f}%"
 
-    ma_val, ma_pct = pct_change(ma_metrics["mae"])
-    ets_val, excel_ets_pct = pct_change(excel_ets_metrics["mae"])
-    alt_val, alt_pct = pct_change(alt_metrics["mae"])
+        ma_pct_val, ma_pct = pct_change(ma_metrics["mae"])
+        ets_pct_val, excel_ets_pct = pct_change(excel_ets_metrics["mae"])
+        alt_pct_val, alt_pct = pct_change(alt_metrics["mae"])
 
-    # Use "reduced" for positive improvement, "with higher variation of" for negative
-    ma_phrase = f"reduced average variation by {ma_pct}" if ma_val >= 0 else f"showed {ma_pct} higher average variation than"
-    ets_phrase = f"{excel_ets_pct}" if ets_val >= 0 else f"{excel_ets_pct} higher variation than"
-    alt_verb = "outperformed" if alt_val >= 0 else "was outperformed by"
+    ma_phrase = f"reduced average variation by {ma_pct}" if ma_pct_val >= 0 else f"showed {ma_pct} higher average variation than"
+    ets_phrase = f"{excel_ets_pct}" if ets_pct_val >= 0 else f"{excel_ets_pct} higher variation than"
+    alt_verb = "outperformed" if alt_pct_val >= 0 else "was outperformed by"
 
     return (
         f"The {selected_display} model matched your historical data more accurately and "

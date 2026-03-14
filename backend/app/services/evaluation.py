@@ -111,3 +111,45 @@ def _compute_excel_ets_metrics(y: np.ndarray, horizon: int) -> tuple[dict, np.nd
             full_forecast = np.full(horizon, np.mean(y))
 
     return _compute_metrics(test, pred), full_forecast
+
+
+def compute_forecast_deviation_pct(
+    forecasts_df: pd.DataFrame,
+    selected_model: str,
+    historical_y: np.ndarray,
+    forecast_horizon: int,
+    excel_ets_forecast: np.ndarray,
+) -> dict[str, float]:
+    """Forecast Deviation %: how much each model's forecast diverges from the primary.
+
+    Formula: mean(|primary - other|) / mean(|primary|) * 100.
+    Computed on the forecast horizon only (last forecast_horizon points).
+    """
+    sel_col = [c for c in forecasts_df.columns
+               if selected_model in c and "lo" not in c and "hi" not in c][0]
+    primary = forecasts_df[sel_col].values[-forecast_horizon:]
+    n = len(primary)
+    scale = np.mean(np.abs(primary))
+
+    alt_name = "AutoARIMA" if selected_model == "AutoETS" else "AutoETS"
+
+    if scale < 1e-10:
+        return {alt_name: 0.0, "Moving Average (Excel)": 0.0, "ETS (Excel)": 0.0}
+
+    alt_col = [c for c in forecasts_df.columns
+               if alt_name in c and "lo" not in c and "hi" not in c][0]
+    alt_vals = forecasts_df[alt_col].values[-forecast_horizon:]
+
+    window = min(forecast_horizon, len(historical_y) - forecast_horizon)
+    ma_vals = np.full(n, np.mean(historical_y[-window:])) if window > 0 else np.full(n, np.mean(historical_y))
+
+    excel_vals = excel_ets_forecast[-forecast_horizon:]
+
+    def _deviation_pct(other):
+        return float(np.mean(np.abs(primary - other)) / scale * 100)
+
+    return {
+        alt_name: _deviation_pct(alt_vals),
+        "Moving Average (Excel)": _deviation_pct(ma_vals),
+        "ETS (Excel)": _deviation_pct(excel_vals),
+    }

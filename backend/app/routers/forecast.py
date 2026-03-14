@@ -15,8 +15,8 @@ from app.services.file_parser import parse_upload, parse_from_bytes
 from app.services.validator import validate_data
 from app.services.data_prep import prepare_data
 from app.services.modeling import run_models, fit_ets, fit_arima, build_forecast_df
-from app.services.evaluation import evaluate_models
-from app.services.decision import select_best_model
+from app.services.evaluation import evaluate_models, compute_forecast_deviation_pct
+from app.services.decision import select_best_model, update_comparison_summary
 from app.services.visualization import generate_charts
 from app.services.pdf_export import generate_pdf
 from app.utils.logger import get_logger, log_stage, audit_log
@@ -108,6 +108,15 @@ async def run_forecast(
             )
 
             decision = select_best_model(metrics, preference, file_hash=file_hash)
+
+            forecast_dev_pct = compute_forecast_deviation_pct(
+                model_result["forecasts"],
+                decision["selected_model"],
+                prepared_df["y"].values,
+                forecast_horizon,
+                excel_ets_forecast,
+            )
+            update_comparison_summary(decision, metrics, forecast_dev_pct)
 
             charts = generate_charts(
                 historical_df=prepared_df,
@@ -248,6 +257,15 @@ async def run_forecast_stream(
             yield _sse("heartbeat")
             yield _sse("progress", progress=85, message="Selecting the best model...")
             decision = select_best_model(metrics, preference, file_hash=file_hash)
+
+            forecast_dev_pct = compute_forecast_deviation_pct(
+                model_result["forecasts"],
+                decision["selected_model"],
+                prepared_df["y"].values,
+                forecast_horizon,
+                excel_ets_forecast,
+            )
+            update_comparison_summary(decision, metrics, forecast_dev_pct)
 
             yield _sse("heartbeat")
             yield _sse("progress", progress=92, message="Building visualizations...")
