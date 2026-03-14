@@ -20,4 +20,5 @@ class ForecastResponse(BaseModel):
     forecast_data: list[dict]
     historical_data: list[dict]
     frequency: str
+    forecast_bias: str
     metrics: dict

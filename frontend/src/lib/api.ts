@@ -52,6 +52,7 @@ export interface ForecastResponse {
   forecast_data: { date: string; value: number; lower_bound?: number; upper_bound?: number }[];
   historical_data: { date: string; value: number }[];
   frequency: string;
+  forecast_bias: string;
   metrics: Record<string, { mae: number; smape: number; mfe: number }>;
 }
 
@@ -260,6 +261,7 @@ export async function exportPDF(
       chart2_base64: data.chart2_base64,
       forecast_data: data.forecast_data,
       metrics: data.metrics,
+      forecast_bias: data.forecast_bias,
       data_processing_ms: timingMs?.dataProcessing ?? null,
       prediction_generation_ms: timingMs?.predictionGeneration ?? null,
     }),
@@ -281,6 +283,7 @@ export async function exportExcel(data: ForecastResponse): Promise<Blob> {
       forecast_data: data.forecast_data,
       historical_data: data.historical_data,
       frequency: data.frequency,
+      forecast_bias: data.forecast_bias,
     }),
   });
 

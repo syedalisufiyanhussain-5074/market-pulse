@@ -53,10 +53,14 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
         for _, row in prepared_df.iterrows()
     ]
 
+    selected_mfe = decision["selected_metrics"]["mfe"]
+    forecast_bias = "Over-Forecast" if selected_mfe < 0 else "Under-Forecast" if selected_mfe > 0 else "Forecast"
+
     return {
         "selected_model": decision["selected_model"],
         "mae_value": decision["selected_metrics"]["mae"],
         "forecast_horizon": forecast_horizon,
+        "forecast_bias": forecast_bias,
         "chart1_base64": charts["chart1_base64"],
         "chart2_base64": charts["chart2_base64"],
         "summary1": decision["summary1"],
@@ -309,6 +313,7 @@ async def export_pdf(http_request: Request, request: PDFExportRequest):
         chart1_base64=request.chart1_base64,
         chart2_base64=request.chart2_base64,
         metrics=request.metrics,
+        forecast_bias=request.forecast_bias,
         data_processing_ms=request.data_processing_ms,
         prediction_generation_ms=request.prediction_generation_ms,
     )
@@ -339,6 +344,7 @@ async def export_excel(http_request: Request, request: ExcelExportRequest):
         historical_data=request.historical_data,
         forecast_data=request.forecast_data,
         frequency=request.frequency,
+        forecast_bias=request.forecast_bias,
     )
 
     filename = f"MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_Report.xlsx"

@@ -59,6 +59,7 @@ def generate_excel(
     historical_data: list[dict],
     forecast_data: list[dict],
     frequency: str,
+    forecast_bias: str = "Forecast",
 ) -> bytes:
     """Generate a clean Excel workbook with historical + forecast data."""
     model_display = DISPLAY_NAMES.get(selected_model, selected_model)
@@ -97,7 +98,7 @@ def generate_excel(
     # Title row (row 3) with same border as table
     title_font = Font(name="Calibri", bold=True, size=14, color="1F2937")
     ws.merge_cells("A3:E3")
-    ws["A3"] = f"Market Pulse — {model_display} Forecast ({freq_label})"
+    ws["A3"] = f"Market Pulse — {model_display} {forecast_bias} ({freq_label})"
     ws["A3"].font = title_font
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center")
     ws.row_dimensions[3].height = 20.5

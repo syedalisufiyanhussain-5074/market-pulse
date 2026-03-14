@@ -115,6 +115,7 @@ def generate_pdf(
     chart1_base64: str,
     chart2_base64: str,
     metrics: dict | None = None,
+    forecast_bias: str = "Forecast",
     data_processing_ms: float | None = None,
     prediction_generation_ms: float | None = None,
     file_hash: str = "",
@@ -141,7 +142,7 @@ def generate_pdf(
         # Report name (no tagline)
         pdf.set_font("Helvetica", "B", 14)
         pdf.set_text_color(*TEXT_WHITE)
-        pdf.cell(0, 8, "Forecast Report", align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 8, f"{forecast_bias} Report", align="C", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(8)
 
         # Row 1: forecast details — matching dashboard tile labels

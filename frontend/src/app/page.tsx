@@ -249,7 +249,7 @@ export default function Home() {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h2 className="text-2xl font-bold tracking-tight text-white">Forecast Results</h2>
+                <h2 className="text-2xl font-bold tracking-tight text-white">{forecastData.forecast_bias} Results</h2>
                 <p className="text-white/50 mt-1">
                   Analysis complete. Review your forecast below.
                 </p>
