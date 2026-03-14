@@ -247,6 +247,34 @@ def _generate_comparison_chart(
     ax.plot(forecast_dates, excel_ets_forecast,
             color=EXCEL_ETS_COLOR, linewidth=1.5, linestyle="-.", label="ETS (Excel)")
 
+    # Connect historical to forecasts (same visual approach as Chart 1)
+    if len(dates) > 0 and len(forecast_dates) > 0:
+        last_date = dates.iloc[-1]
+        last_value = values.iloc[-1]
+        connections = [
+            (sel_col, ACCENT),
+            (alt_col[0] if alt_col else None, ALT_COLOR),
+        ]
+        for col, color in connections:
+            if col:
+                ax.plot(
+                    [last_date, forecast_dates.iloc[0]],
+                    [last_value, forecasts[col].iloc[0]],
+                    color=color, linewidth=1.5, linestyle="--", alpha=0.5,
+                )
+        # Moving Average (Excel)
+        ax.plot(
+            [last_date, forecast_dates.iloc[0]],
+            [last_value, ma_value],
+            color=MA_COLOR, linewidth=1.5, linestyle="--", alpha=0.5,
+        )
+        # ETS (Excel)
+        ax.plot(
+            [last_date, forecast_dates.iloc[0]],
+            [last_value, excel_ets_forecast[0]],
+            color=EXCEL_ETS_COLOR, linewidth=1.5, linestyle="--", alpha=0.5,
+        )
+
     ax.set_xlabel("")
     # No Y axis label, no title
 
