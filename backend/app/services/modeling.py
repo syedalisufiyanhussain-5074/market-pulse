@@ -172,6 +172,16 @@ def _fit_auto_sarima(
     seasonal = seasonal_period is not None and seasonal_period > 1
     m = seasonal_period if seasonal else 1
 
+    # Short-circuit for zero-variance (stagnant) data — no model needed
+    if np.std(y) < 1e-10:
+        mean_val = float(np.mean(y))
+        forecast = np.full(horizon, mean_val)
+        n_cv = min(horizon, len(y))
+        cv_results = [{"y": float(y[-n_cv + j]), "AutoARIMA": mean_val} for j in range(n_cv)]
+        ci_lo = np.full(horizon, mean_val)
+        ci_hi = np.full(horizon, mean_val)
+        return cv_results, forecast, (ci_lo, ci_hi)
+
     # Reduce search space for larger datasets
     large = len(y) > 200
     max_pq = 2 if large else 3

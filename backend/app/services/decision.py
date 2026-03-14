@@ -104,7 +104,9 @@ def _generate_comparison_summary(
     selected_mae = selected_metrics["mae"]
 
     def pct_change(baseline_mae: float) -> tuple[float, str]:
-        if selected_mae == 0 or baseline_mae == 0 or baseline_mae == float("inf"):
+        if selected_mae == 0 and baseline_mae == 0:
+            return 0.0, "0.0%"  # Both models are perfect
+        if baseline_mae == 0 or baseline_mae == float("inf"):
             return 0.0, "N/A"
         improvement = ((baseline_mae - selected_mae) / baseline_mae) * 100
         return improvement, f"{abs(improvement):.1f}%"
