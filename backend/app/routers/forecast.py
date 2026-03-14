@@ -25,7 +25,7 @@ logger = get_logger("forecast_router")
 router = APIRouter(prefix="/api", tags=["forecast"])
 
 
-def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq):
+def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference):
     """Build the forecast result dict (shared by both endpoints)."""
     forecasts = model_result["forecasts"]
     sel_model = decision["selected_model"]
@@ -53,8 +53,7 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
         for _, row in prepared_df.iterrows()
     ]
 
-    selected_mfe = decision["selected_metrics"]["mfe"]
-    forecast_bias = "Over-Forecast" if selected_mfe < 0 else "Under-Forecast" if selected_mfe > 0 else "Forecast"
+    forecast_bias = "Over-Forecast" if preference == "capacity-buffered" else "Under-Forecast"
 
     return {
         "selected_model": decision["selected_model"],
@@ -120,11 +119,12 @@ async def run_forecast(
                 file_hash=file_hash,
             )
 
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq)
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference)
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
                 session_id=session_id,
+                notes=result["forecast_bias"],
                 duration_ms=round((time.perf_counter() - t0) * 1000, 1),
             )
             return ForecastResponse(**result)
@@ -262,11 +262,12 @@ async def run_forecast_stream(
             )
 
             yield _sse("progress", progress=98, message="Finalizing your forecast...")
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq)
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference)
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
                 session_id=session_id,
+                notes=result["forecast_bias"],
                 duration_ms=round((time.perf_counter() - t0) * 1000, 1),
             )
             yield _sse("complete", **result)
