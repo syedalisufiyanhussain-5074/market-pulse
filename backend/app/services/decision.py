@@ -141,6 +141,17 @@ def _generate_comparison_summary(
         ets_pct_val, excel_ets_pct = pct_change(excel_ets_metrics["mae"])
         alt_pct_val, alt_pct = pct_change(alt_metrics["mae"])
 
+    if forecast_deviation_pct:
+        # Deviation %: unbounded divergence metric — use "differs by" wording
+        return (
+            f"The {selected_display} model matched your historical data more accurately. "
+            f"Its forecast differs from Moving Average (Excel) by {ma_pct}, "
+            f"from ETS (Excel) by {excel_ets_pct}, and from the alternative statistical "
+            f"model, {alt_display}, by {alt_pct}, delivering the most consistent "
+            f"results overall."
+        )
+
+    # MAE fallback: bounded 0-100% improvement — "reduced by" wording is safe
     ma_phrase = f"reduced average variation by {ma_pct}" if ma_pct_val >= 0 else f"showed {ma_pct} higher average variation than"
     ets_phrase = f"{excel_ets_pct}" if ets_pct_val >= 0 else f"{excel_ets_pct} higher variation than"
     alt_verb = "outperformed" if alt_pct_val >= 0 else "was outperformed by"

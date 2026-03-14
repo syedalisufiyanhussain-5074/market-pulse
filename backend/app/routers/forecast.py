@@ -203,17 +203,36 @@ async def run_forecast_stream(
     def generate():
         t0 = time.perf_counter()
         try:
-            yield _sse("heartbeat")
             yield _sse("progress", progress=5, message="Reading your data...")
-            df, file_hash = parse_from_bytes(contents, filename)
+            parse_result = None
+            for item in _run_with_heartbeats(
+                lambda: parse_from_bytes(contents, filename)
+            ):
+                if isinstance(item, str):
+                    yield item
+                else:
+                    parse_result = item
+            df, file_hash = parse_result
 
-            yield _sse("heartbeat")
             yield _sse("progress", progress=15, message="Checking data quality...")
-            parsed = validate_data(df, date_column, target_column, file_hash=file_hash)
+            parsed = None
+            for item in _run_with_heartbeats(
+                lambda: validate_data(df, date_column, target_column, file_hash=file_hash)
+            ):
+                if isinstance(item, str):
+                    yield item
+                else:
+                    parsed = item
 
-            yield _sse("heartbeat")
             yield _sse("progress", progress=25, message="Preparing time series...")
-            prep_result = prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed)
+            prep_result = None
+            for item in _run_with_heartbeats(
+                lambda: prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed)
+            ):
+                if isinstance(item, str):
+                    yield item
+                else:
+                    prep_result = item
             prepared_df = prep_result["df"]
             freq = prep_result["freq"]
             seasonal_period = prep_result["seasonal_period"]
