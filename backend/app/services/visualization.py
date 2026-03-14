@@ -18,7 +18,7 @@ logger = get_logger("visualization")
 # Dark theme colors matching frontend (tuxedo style)
 BG_COLOR = "#000000"          # pure black
 CARD_COLOR = "#0a0a0a"        # near-black
-GRID_COLOR = "#1a1a1a"        # very dark grey
+GRID_COLOR = "#2a2a2a"        # dark grey (visible grid cues)
 TEXT_COLOR = "#ffffff"          # pure white
 ACCENT = "#10b981"             # emerald-500 (primary/green)
 ALT_COLOR = "#38bdf8"          # sky-400 (brighter blue for secondary)

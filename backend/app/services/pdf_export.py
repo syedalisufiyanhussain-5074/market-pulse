@@ -145,24 +145,20 @@ def generate_pdf(
         pdf.cell(0, 8, f"{forecast_bias} Report", align="C", new_x="LMARGIN", new_y="NEXT")
         pdf.ln(8)
 
-        # Row 1: forecast details — matching dashboard tile labels
-        _add_info_row(pdf, "Selected Model", selected_display)
+        # Intro metrics — 3×2 grid (forecast details left, timing right)
         smape = None
         if metrics and selected_model in metrics:
             smape = metrics[selected_model].get("smape")
         accuracy_value = f"{mae_value:,.2f} pts (~{smape:.1f}%)" if smape is not None else f"{mae_value:,.2f} pts"
-        _add_info_row(pdf, "Model Accuracy", accuracy_value)
-        _add_info_row(pdf, "Forecast Window", f"{forecast_horizon} periods")
+        prep_time = _format_time(data_processing_ms) if data_processing_ms is not None else "--"
+        gen_time = _format_time(prediction_generation_ms) if prediction_generation_ms is not None else "--"
+        total_time = _format_time(data_processing_ms + prediction_generation_ms) if data_processing_ms is not None and prediction_generation_ms is not None else "--"
 
-        # Row 2: timing details
-        if data_processing_ms is not None or prediction_generation_ms is not None:
-            pdf.ln(2)
-            _add_info_row(pdf, "Preparing Data", _format_time(data_processing_ms) if data_processing_ms is not None else "--")
-            _add_info_row(pdf, "Generating Forecast", _format_time(prediction_generation_ms) if prediction_generation_ms is not None else "--")
-            if data_processing_ms is not None and prediction_generation_ms is not None:
-                _add_info_row(pdf, "Complete Flow", _format_time(data_processing_ms + prediction_generation_ms))
-            else:
-                _add_info_row(pdf, "Complete Flow", "--")
+        _add_info_grid(pdf, [
+            ("Selected Model", selected_display, "Preparing Data", prep_time),
+            ("Model Accuracy", accuracy_value, "Generating Forecast", gen_time),
+            ("Forecast Window", f"{forecast_horizon} periods", "Complete Flow", total_time),
+        ])
         pdf.ln(6)
 
         # Graph 1 header
@@ -195,13 +191,37 @@ def generate_pdf(
         return pdf.output()
 
 
-def _add_info_row(pdf: FPDF, label: str, value: str) -> None:
-    pdf.set_font("Helvetica", "", 10)
-    pdf.set_text_color(*TEXT_MUTED)
-    pdf.cell(55, 7, label + ":", new_x="RIGHT")
-    pdf.set_font("Helvetica", "B", 10)
-    pdf.set_text_color(*TEXT_WHITE)
-    pdf.cell(0, 7, value, new_x="LMARGIN", new_y="NEXT")
+def _add_info_grid(pdf: FPDF, rows: list[tuple[str, str, str, str]]) -> None:
+    """Draw metric rows in a 3×2 grid. Each row: (label1, value1, label2, value2)."""
+    col1_x = 10        # left column label start
+    col1_val_x = 50    # left column value start
+    col2_x = 110       # right column label start
+    col2_val_x = 155   # right column value start
+    row_h = 7
+
+    for label1, value1, label2, value2 in rows:
+        y = pdf.get_y()
+        # Left label
+        pdf.set_xy(col1_x, y)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*TEXT_MUTED)
+        pdf.cell(col1_val_x - col1_x, row_h, label1 + ":")
+        # Left value
+        pdf.set_xy(col1_val_x, y)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*TEXT_WHITE)
+        pdf.cell(col2_x - col1_val_x, row_h, value1)
+        # Right label
+        pdf.set_xy(col2_x, y)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.set_text_color(*TEXT_MUTED)
+        pdf.cell(col2_val_x - col2_x, row_h, label2 + ":")
+        # Right value
+        pdf.set_xy(col2_val_x, y)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.set_text_color(*TEXT_WHITE)
+        pdf.cell(0, row_h, value2)
+        pdf.ln(row_h)
 
 
 def _sanitize(text: str) -> str:
