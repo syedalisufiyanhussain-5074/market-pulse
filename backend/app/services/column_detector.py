@@ -34,15 +34,18 @@ def detect_columns(df: pd.DataFrame, file_hash: str = "") -> dict:
     return {"date_columns": date_columns, "numeric_columns": numeric_columns}
 
 
+_SAMPLE_SIZE = 1000
+
+
 def _is_date_column(series: pd.Series) -> bool:
     if pd.api.types.is_datetime64_any_dtype(series):
         return True
-    # Don't auto-detect numeric columns as dates — avoids misclassifying
-    # values in the 1900-2100 range (e.g., inventory counts, prices).
-    # Year-only columns are still parsed correctly when the user selects
-    # them as the date column (validator/data_prep use parse_time_column).
     if pd.api.types.is_numeric_dtype(series):
         return False
+    # Sample first for speed, full validation only if sample passes
+    if len(series) > _SAMPLE_SIZE:
+        if not looks_like_time_column(series.head(_SAMPLE_SIZE)):
+            return False
     return looks_like_time_column(series)
 
 
@@ -51,9 +54,13 @@ def _is_numeric_column(series: pd.Series) -> bool:
         non_null_ratio = series.notna().sum() / len(series)
         return non_null_ratio >= NUMERIC_DENSITY_THRESHOLD
 
-    coerced = pd.to_numeric(series, errors="coerce")
     total = len(series)
     if total == 0:
         return False
-    valid_ratio = coerced.notna().sum() / total
-    return valid_ratio >= NUMERIC_DENSITY_THRESHOLD
+    # Sample first for speed
+    if total > _SAMPLE_SIZE:
+        sample = pd.to_numeric(series.head(_SAMPLE_SIZE), errors="coerce")
+        if sample.notna().sum() / len(sample) < NUMERIC_DENSITY_THRESHOLD:
+            return False
+    coerced = pd.to_numeric(series, errors="coerce")
+    return coerced.notna().sum() / total >= NUMERIC_DENSITY_THRESHOLD

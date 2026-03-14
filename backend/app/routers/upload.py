@@ -6,6 +6,7 @@ from app.schemas.responses import UploadResponse
 from app.services.file_parser import parse_upload
 from app.services.column_detector import detect_columns
 from app.utils.logger import get_logger, log_stage, audit_log
+from app.utils import file_cache
 
 logger = get_logger("upload_router")
 router = APIRouter(prefix="/api", tags=["upload"])
@@ -18,6 +19,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
     try:
         with log_stage(logger, "data_processing"):
             df, file_hash = await parse_upload(file)
+            file_cache.put(file_hash, df)
 
             columns = detect_columns(df, file_hash=file_hash)
 

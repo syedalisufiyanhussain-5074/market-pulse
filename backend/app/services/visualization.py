@@ -56,7 +56,7 @@ def generate_charts(
 
 def _fig_to_base64(fig: plt.Figure) -> str:
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight", facecolor=fig.get_facecolor())
+    fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     plt.close(fig)
     buf.seek(0)
     return base64.b64encode(buf.read()).decode("utf-8")

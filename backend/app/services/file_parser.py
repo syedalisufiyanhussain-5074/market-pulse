@@ -25,7 +25,10 @@ def parse_from_bytes(contents: bytes, filename: str) -> tuple[pd.DataFrame, str]
             if extension == ".csv":
                 df = pd.read_csv(io.BytesIO(contents))
             else:
-                df = pd.read_excel(io.BytesIO(contents), sheet_name=0, engine="openpyxl")
+                try:
+                    df = pd.read_excel(io.BytesIO(contents), sheet_name=0, engine="calamine")
+                except Exception:
+                    df = pd.read_excel(io.BytesIO(contents), sheet_name=0, engine="openpyxl")
         except Exception as e:
             logger.error(f"Parse error: {e}", extra={"file_hash": file_hash})
             raise HTTPException(

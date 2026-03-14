@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import time
@@ -20,6 +21,7 @@ from app.services.decision import select_best_model, update_comparison_summary
 from app.services.visualization import generate_charts
 from app.services.pdf_export import generate_pdf
 from app.utils.logger import get_logger, log_stage, audit_log
+from app.utils import file_cache
 
 logger = get_logger("forecast_router")
 router = APIRouter(prefix="/api", tags=["forecast"])
@@ -89,6 +91,7 @@ async def run_forecast(
     try:
         with log_stage(logger, "prediction_generation"):
             df, file_hash = await parse_upload(file)
+            file_cache.put(file_hash, df)
             parsed = validate_data(df, date_column, target_column, file_hash=file_hash)
             prep_result = prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed)
             prepared_df = prep_result["df"]
@@ -204,15 +207,21 @@ async def run_forecast_stream(
         t0 = time.perf_counter()
         try:
             yield _sse("progress", progress=5, message="Reading your data...")
-            parse_result = None
-            for item in _run_with_heartbeats(
-                lambda: parse_from_bytes(contents, filename)
-            ):
-                if isinstance(item, str):
-                    yield item
-                else:
-                    parse_result = item
-            df, file_hash = parse_result
+            # Try cache first (DataFrame was cached during upload)
+            file_hash = hashlib.sha256(contents).hexdigest()[:12]
+            cached_df = file_cache.get(file_hash)
+            if cached_df is not None:
+                df = cached_df
+            else:
+                parse_result = None
+                for item in _run_with_heartbeats(
+                    lambda: parse_from_bytes(contents, filename)
+                ):
+                    if isinstance(item, str):
+                        yield item
+                    else:
+                        parse_result = item
+                df, file_hash = parse_result
 
             yield _sse("progress", progress=15, message="Checking data quality...")
             parsed = None
