@@ -32,10 +32,10 @@ export default function ForecastResults({ data, displayModel, timingMs }: Foreca
         <MetricCard label="Selected Model" value={modelDisplay} />
         <MetricCard
           label="Model Accuracy"
-          value={`${data.mae_value.toLocaleString(undefined, {
+          value={`${data.mae_value?.toLocaleString(undefined, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
-          })} pts (~${data.metrics[data.selected_model]?.smape.toFixed(1) ?? "?"}%)`}
+          }) ?? "N/A"} pts (~${data.metrics[data.selected_model]?.smape?.toFixed(1) ?? "N/A"}%)`}
         />
         <MetricCard label="Forecast Window" value={`${data.forecast_horizon} periods`} />
       </div>
