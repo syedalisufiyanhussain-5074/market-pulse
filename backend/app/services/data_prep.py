@@ -19,10 +19,10 @@ FREQUENCY_MAP = {
 # Per-frequency forecast horizon bounds (min, max periods)
 HORIZON_BOUNDS = {
     "D": (7, 30),
-    "W": (4, 12),
-    "MS": (3, 12),
-    "QS": (2, 8),
-    "YS": (2, 5),
+    "W": (2, 12),
+    "MS": (1, 6),
+    "QS": (1, 2),
+    "YS": (1, 2),
 }
 
 MAX_ROWS_FOR_MODELING = 150

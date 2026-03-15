@@ -23,18 +23,26 @@ const FREQ_LABELS: Record<string, string> = {
 
 const PREDICTION_PRESETS: Record<string, number[]> = {
   D: [7, 14, 21, 30, 60, 90],
-  W: [4, 8, 12, 26, 52],
-  MS: [3, 6, 12, 18, 24, 36],
-  QS: [2, 4, 6, 8, 12],
-  YS: [2, 3, 4, 5],
+  W: [2, 4, 8, 12, 26],
+  MS: [1, 2, 3, 6, 9, 12],
+  QS: [1, 2, 3, 4],
+  YS: [1, 2, 3],
 };
 
 const HORIZON_BOUNDS: Record<string, [number, number]> = {
   D: [7, 30],
-  W: [4, 12],
-  MS: [3, 12],
-  QS: [2, 8],
-  YS: [2, 5],
+  W: [2, 12],
+  MS: [1, 6],
+  QS: [1, 2],
+  YS: [1, 2],
+};
+
+const FREQ_UNITS: Record<string, [string, string]> = {
+  D: ["Day", "Days"],
+  W: ["Week", "Weeks"],
+  MS: ["Month", "Months"],
+  QS: ["Quarter", "Quarters"],
+  YS: ["Year", "Years"],
 };
 
 const APPROX_DAYS: Record<string, number> = {
@@ -115,7 +123,8 @@ export default function ColumnSelector({
   const predictionOptions = useMemo(() => {
     if (!frequency) return [];
     const presets = PREDICTION_PRESETS[frequency] || [];
-    return presets.filter((p) => p <= effectiveRows);
+    const maxAllowed = frequency === "YS" ? effectiveRows * 2 : effectiveRows;
+    return presets.filter((p) => p <= maxAllowed);
   }, [frequency, effectiveRows]);
 
   // Default horizon (mirrors backend 20% rule)
@@ -221,12 +230,16 @@ export default function ColumnSelector({
               </SelectTrigger>
               <SelectContent>
                 {predictionOptions.length > 0 ? (
-                  predictionOptions.map((n) => (
-                    <SelectItem key={n} value={String(n)}>
-                      {n} {(FREQ_LABELS[frequency] ?? "periods").toLowerCase()}
-                      {n === defaultHorizon ? " (recommended)" : ""}
-                    </SelectItem>
-                  ))
+                  predictionOptions.map((n) => {
+                    const [singular, plural] = FREQ_UNITS[frequency] ?? ["Period", "Periods"];
+                    const unit = n === 1 ? singular : plural;
+                    return (
+                      <SelectItem key={n} value={String(n)}>
+                        {n} {unit}
+                        {n === defaultHorizon ? " (recommended)" : ""}
+                      </SelectItem>
+                    );
+                  })
                 ) : (
                   <SelectItem value="__empty" disabled>
                     Not enough data for this frequency
