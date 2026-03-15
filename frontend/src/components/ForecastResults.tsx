@@ -31,7 +31,7 @@ export default function ForecastResults({ data, displayModel, timingMs }: Foreca
       <div className="grid grid-cols-3 gap-4">
         <MetricCard label="Selected Model" value={modelDisplay} />
         <MetricCard
-          label="Model Accuracy"
+          label={data.metrics_source === "in_sample" ? "Model Accuracy (training fit)" : "Model Accuracy"}
           value={`${data.mae_value?.toLocaleString(undefined, {
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,

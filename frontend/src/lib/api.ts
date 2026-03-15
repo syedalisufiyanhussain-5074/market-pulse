@@ -56,6 +56,7 @@ export interface ForecastResponse {
   frequency: string;
   forecast_bias: string;
   metrics: Record<string, { mae: number; smape: number; mfe: number }>;
+  metrics_source: string;
 }
 
 function extractError(detail: unknown, fallback: string): AppError {

@@ -39,7 +39,7 @@ def _sanitize(value):
     return value
 
 
-def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference):
+def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source="cross_validation"):
     """Build the forecast result dict (shared by both endpoints)."""
     forecasts = model_result["forecasts"]
     sel_model = decision["selected_model"]
@@ -91,6 +91,7 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
             "Moving Average (Excel)": metrics["Moving Average (Excel)"],
             "ETS (Excel)": metrics["ETS (Excel)"],
         },
+        "metrics_source": metrics_source,
     })
 
 
@@ -147,9 +148,11 @@ async def run_forecast(
                 forecast_horizon=forecast_horizon,
                 excel_ets_forecast=excel_ets_forecast,
                 file_hash=file_hash,
+                freq=freq,
             )
 
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference)
+            metrics_source = model_result.get("metrics_source", "cross_validation")
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source)
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
@@ -325,10 +328,12 @@ async def run_forecast_stream(
                 forecast_horizon=forecast_horizon,
                 excel_ets_forecast=excel_ets_forecast,
                 file_hash=file_hash,
+                freq=freq,
             )
 
             yield _sse("progress", progress=98, message="Finalizing your forecast...")
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference)
+            metrics_source = model_result.get("metrics_source", "cross_validation")
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source)
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",

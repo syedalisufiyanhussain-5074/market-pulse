@@ -34,7 +34,7 @@ const HORIZON_BOUNDS: Record<string, [number, number]> = {
   W: [2, 12],
   MS: [2, 6],
   QS: [1, 2],
-  YS: [1, 2],
+  YS: [1, 1],
 };
 
 const FREQ_UNITS: Record<string, [string, string]> = {

@@ -22,10 +22,13 @@ HORIZON_BOUNDS = {
     "W": (2, 12),
     "MS": (2, 6),
     "QS": (1, 2),
-    "YS": (1, 2),
+    "YS": (1, 1),
 }
 
 MAX_ROWS_FOR_MODELING = 150
+
+# Approximate days per period — used to scale horizon after downsampling
+APPROX_DAYS = {"D": 1, "W": 7, "MS": 30, "QS": 91, "YS": 365}
 
 # Ordered from finest to coarsest — used to validate frequency overrides
 FREQ_ORDER = ["D", "W", "MS", "QS", "YS"]
@@ -89,7 +92,19 @@ def prepare_data(
                     )
 
         # Downsample if too many rows for efficient modeling
+        original_alias = freq_info["alias"]
         prepared, freq_info = _maybe_downsample(prepared, freq_info, file_hash)
+
+        # Scale horizon_override if downsampling changed the frequency
+        if horizon_override is not None and freq_info["alias"] != original_alias:
+            original_override = horizon_override
+            orig_days = APPROX_DAYS.get(original_alias, 1)
+            new_days = APPROX_DAYS.get(freq_info["alias"], 1)
+            horizon_override = max(1, round(horizon_override * orig_days / new_days))
+            logger.info(
+                f"Horizon scaled: {original_override} {original_alias} → {horizon_override} {freq_info['alias']}",
+                extra={"file_hash": file_hash},
+            )
 
         # Interpolate missing values
         prepared["y"] = prepared["y"].interpolate(method="linear")
@@ -126,6 +141,17 @@ def prepare_data(
                 f"User override: horizon set to {forecast_horizon} (requested {horizon_override})",
                 extra={"file_hash": file_hash},
             )
+
+        # Guarantee CV can produce at least one valid training window
+        # CV needs: len(data) - horizon >= horizon → horizon <= len(data) // 2
+        max_cv_horizon = max(1, len(prepared) // 2)
+        if forecast_horizon > max_cv_horizon:
+            logger.info(
+                f"Horizon clamped from {forecast_horizon} to {max_cv_horizon} "
+                f"(need at least {forecast_horizon * 2} rows for {forecast_horizon}-step CV)",
+                extra={"file_hash": file_hash},
+            )
+            forecast_horizon = max_cv_horizon
 
         logger.info(
             f"Prepared: {len(prepared)} rows, freq={freq_info['alias']}, "

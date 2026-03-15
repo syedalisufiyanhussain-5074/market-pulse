@@ -54,8 +54,13 @@ def build_forecast_df(
     file_hash: str = "",
 ) -> dict:
     """Combine ETS + ARIMA results into forecasts DataFrame + cv_results."""
-    ets_cv, ets_forecast, ets_conf = ets_result
-    arima_cv, arima_forecast, arima_conf = arima_result
+    ets_cv_tuple, ets_forecast, ets_conf = ets_result
+    arima_cv_tuple, arima_forecast, arima_conf = arima_result
+
+    # Unpack CV results and source flags
+    ets_cv, ets_source = ets_cv_tuple
+    arima_cv, arima_source = arima_cv_tuple
+    metrics_source = "in_sample" if (ets_source == "in_sample" or arima_source == "in_sample") else "cross_validation"
 
     dates = df["ds"].values
     last_date = pd.Timestamp(dates[-1])
@@ -83,6 +88,7 @@ def build_forecast_df(
     return {
         "forecasts": forecasts,
         "cv_results": cv_results,
+        "metrics_source": metrics_source,
     }
 
 
@@ -133,7 +139,7 @@ def _fit_auto_ets(
                     continue
 
     # Cross-validation
-    cv_results = _rolling_cv_ets(y, best_model, sp, horizon, n_windows)
+    cv_results, ets_cv_source = _rolling_cv_ets(y, best_model, sp, horizon, n_windows)
 
     # Final forecast
     try:
@@ -160,7 +166,7 @@ def _fit_auto_ets(
     ci_lo = forecast - widths
     ci_hi = forecast + widths
 
-    return cv_results, forecast, (ci_lo, ci_hi)
+    return (cv_results, ets_cv_source), forecast, (ci_lo, ci_hi)
 
 
 def _fit_auto_sarima(
@@ -180,7 +186,7 @@ def _fit_auto_sarima(
         cv_results = [{"y": float(y[-n_cv + j]), "AutoARIMA": mean_val} for j in range(n_cv)]
         ci_lo = np.full(horizon, mean_val)
         ci_hi = np.full(horizon, mean_val)
-        return cv_results, forecast, (ci_lo, ci_hi)
+        return (cv_results, "in_sample"), forecast, (ci_lo, ci_hi)
 
     # Reduce search space for larger datasets
     large = len(y) > 200
@@ -207,7 +213,7 @@ def _fit_auto_sarima(
         # Cross-validation
         order = arima_model.order
         seasonal_order = arima_model.seasonal_order
-        cv_results = _rolling_cv_sarima(y, order, seasonal_order, horizon, n_windows)
+        cv_results, arima_cv_source = _rolling_cv_sarima(y, order, seasonal_order, horizon, n_windows)
 
         # Final forecast with confidence intervals
         forecast, conf_int = arima_model.predict(n_periods=horizon, return_conf_int=True, alpha=0.20)
@@ -224,8 +230,9 @@ def _fit_auto_sarima(
         ci_hi = forecast + widths
         n_cv = min(horizon, len(y))
         cv_results = [{"y": float(y[-n_cv + j]), "AutoARIMA": mean_val} for j in range(n_cv)]
+        arima_cv_source = "in_sample"
 
-    return cv_results, forecast, (ci_lo, ci_hi)
+    return (cv_results, arima_cv_source), forecast, (ci_lo, ci_hi)
 
 
 def _rolling_cv_ets(
@@ -234,7 +241,7 @@ def _rolling_cv_ets(
     sp: int | None,
     horizon: int,
     n_windows: int,
-) -> list[dict]:
+) -> tuple[list[dict], str]:
     results = []
     n = len(y)
     step = max(1, horizon)
@@ -257,6 +264,10 @@ def _rolling_cv_ets(
                     seasonal_periods=sp, initialization_method="estimated",
                 ).fit(optimized=True, use_brute=False)
                 pred = model.forecast(horizon)
+                # Sanitize NaN predictions
+                if np.any(np.isnan(pred)):
+                    fb = float(np.mean(train)) if len(train) > 0 else float(np.mean(y))
+                    pred = np.where(np.isnan(pred), fb, pred)
             except Exception:
                 fallback = float(np.mean(train)) if len(train) > 0 else float(np.mean(y))
                 pred = np.full(horizon, fallback)
@@ -264,7 +275,30 @@ def _rolling_cv_ets(
         for j in range(len(actual)):
             results.append({"y": actual[j], "AutoETS": pred[j]})
 
-    return results
+    if results:
+        return results, "cross_validation"
+
+    # Fallback: in-sample fitted values when CV produces no valid windows
+    logger.info("No valid CV windows for ETS, using in-sample residuals")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            model = ExponentialSmoothing(
+                y, trend=trend, seasonal=seasonal,
+                seasonal_periods=sp, initialization_method="estimated",
+            ).fit(optimized=True, use_brute=False)
+            fitted = model.fittedvalues
+            # Sanitize NaN fitted values
+            fill_val = float(np.nanmean(y))
+            fitted = np.where(np.isnan(fitted), fill_val, fitted)
+            for j in range(len(y)):
+                results.append({"y": float(y[j]), "AutoETS": float(fitted[j])})
+    except Exception:
+        mean_val = float(np.mean(y))
+        for j in range(len(y)):
+            results.append({"y": float(y[j]), "AutoETS": mean_val})
+
+    return results, "in_sample"
 
 
 def _rolling_cv_sarima(
@@ -273,7 +307,7 @@ def _rolling_cv_sarima(
     seasonal_order: tuple,
     horizon: int,
     n_windows: int,
-) -> list[dict]:
+) -> tuple[list[dict], str]:
     from statsmodels.tsa.statespace.sarimax import SARIMAX
 
     results = []
@@ -298,6 +332,10 @@ def _rolling_cv_sarima(
                     enforce_stationarity=False, enforce_invertibility=False,
                 ).fit(disp=False, maxiter=maxiter)
                 pred = model.forecast(horizon)
+                # Sanitize NaN predictions
+                if np.any(np.isnan(pred)):
+                    fb = float(np.mean(train)) if len(train) > 0 else float(np.mean(y))
+                    pred = np.where(np.isnan(pred), fb, pred)
             except Exception:
                 fallback = float(np.mean(train)) if len(train) > 0 else float(np.mean(y))
                 pred = np.full(horizon, fallback)
@@ -305,7 +343,31 @@ def _rolling_cv_sarima(
         for j in range(len(actual)):
             results.append({"y": actual[j], "AutoARIMA": pred[j]})
 
-    return results
+    if results:
+        return results, "cross_validation"
+
+    # Fallback: in-sample fitted values when CV produces no valid windows
+    logger.info("No valid CV windows for ARIMA, using in-sample residuals")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            maxiter = 30 if len(y) > 200 else 50
+            model = SARIMAX(
+                y, order=order, seasonal_order=seasonal_order,
+                enforce_stationarity=False, enforce_invertibility=False,
+            ).fit(disp=False, maxiter=maxiter)
+            fitted = model.fittedvalues
+            # Sanitize NaN fitted values
+            fill_val = float(np.nanmean(y))
+            fitted = np.where(np.isnan(fitted), fill_val, fitted)
+            for j in range(len(y)):
+                results.append({"y": float(y[j]), "AutoARIMA": float(fitted[j])})
+    except Exception:
+        mean_val = float(np.mean(y))
+        for j in range(len(y)):
+            results.append({"y": float(y[j]), "AutoARIMA": mean_val})
+
+    return results, "in_sample"
 
 
 def _build_cv_results(ets_cv: list[dict], arima_cv: list[dict]) -> pd.DataFrame:

@@ -24,3 +24,4 @@ class ForecastResponse(BaseModel):
     frequency: str
     forecast_bias: str
     metrics: dict
+    metrics_source: str  # "cross_validation" or "in_sample"

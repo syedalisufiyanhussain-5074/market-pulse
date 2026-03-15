@@ -42,14 +42,15 @@ def generate_charts(
     forecast_horizon: int,
     excel_ets_forecast: np.ndarray | None = None,
     file_hash: str = "",
+    freq: str = "MS",
 ) -> dict:
     with log_stage(logger, "visualization", file_hash=file_hash):
         chart1 = _generate_selected_chart(
-            historical_df, forecasts, selected_model, forecast_horizon
+            historical_df, forecasts, selected_model, forecast_horizon, freq=freq
         )
         chart2 = _generate_comparison_chart(
             historical_df, forecasts, selected_model, alternative_model,
-            forecast_horizon, excel_ets_forecast
+            forecast_horizon, excel_ets_forecast, freq=freq
         )
         return {"chart1_base64": chart1, "chart2_base64": chart2}
 
@@ -62,7 +63,7 @@ def _fig_to_base64(fig: plt.Figure) -> str:
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
-def _apply_dark_theme(ax: plt.Axes, fig: plt.Figure) -> None:
+def _apply_dark_theme(ax: plt.Axes, fig: plt.Figure, freq: str | None = None) -> None:
     fig.set_facecolor(BG_COLOR)
     ax.set_facecolor(CARD_COLOR)
     ax.tick_params(colors=TEXT_COLOR, labelsize=10, width=0.5)
@@ -72,6 +73,10 @@ def _apply_dark_theme(ax: plt.Axes, fig: plt.Figure) -> None:
     for spine in ax.spines.values():
         spine.set_color(GRID_COLOR)
     ax.grid(True, color=GRID_COLOR, alpha=0.4, linewidth=0.5)
+    if freq == "QS":
+        ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
+    elif freq == "YS":
+        ax.xaxis.set_major_locator(mdates.YearLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
     # Format Y axis: white, bold, comma-separated numbers
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f"{x:,.0f}"))
@@ -89,9 +94,10 @@ def _generate_selected_chart(
     forecasts: pd.DataFrame,
     selected_model: str,
     forecast_horizon: int,
+    freq: str = "MS",
 ) -> str:
     fig, ax = plt.subplots(figsize=(12, 5))
-    _apply_dark_theme(ax, fig)
+    _apply_dark_theme(ax, fig, freq=freq)
 
     dates = historical_df["ds"]
     values = historical_df["y"]
@@ -147,6 +153,11 @@ def _generate_selected_chart(
             alpha=0.5,
         )
 
+    # For yearly data, explicitly set ticks at all data + forecast points
+    if freq == "YS":
+        all_dates = list(dates) + list(forecast_dates)
+        ax.set_xticks(all_dates)
+
     ax.set_xlabel("")
     # No Y axis label, no title
 
@@ -188,9 +199,10 @@ def _generate_comparison_chart(
     alternative_model: str,
     forecast_horizon: int,
     excel_ets_forecast: np.ndarray | None = None,
+    freq: str = "MS",
 ) -> str:
     fig, ax = plt.subplots(figsize=(12, 5))
-    _apply_dark_theme(ax, fig)
+    _apply_dark_theme(ax, fig, freq=freq)
 
     dates = historical_df["ds"]
     values = historical_df["y"]
@@ -274,6 +286,11 @@ def _generate_comparison_chart(
             [last_value, excel_ets_forecast[0]],
             color=EXCEL_ETS_COLOR, linewidth=1.5, linestyle="--", alpha=0.5,
         )
+
+    # For yearly data, explicitly set ticks at all data + forecast points
+    if freq == "YS":
+        all_dates = list(dates) + list(forecast_dates)
+        ax.set_xticks(all_dates)
 
     ax.set_xlabel("")
     # No Y axis label, no title

@@ -1,3 +1,5 @@
+import math
+
 from app.utils.logger import get_logger, log_stage
 
 logger = get_logger("decision")
@@ -22,8 +24,8 @@ def select_best_model(
         ma_metrics = metrics["Moving Average (Excel)"]
         excel_ets_metrics = metrics["ETS (Excel)"]
 
-        ets_mae = ets_metrics["mae"]
-        arima_mae = arima_metrics["mae"]
+        ets_mae = ets_metrics["mae"] if not math.isnan(ets_metrics["mae"]) else float("inf")
+        arima_mae = arima_metrics["mae"] if not math.isnan(arima_metrics["mae"]) else float("inf")
 
         # Step 1: Select model with lowest MAE
         if ets_mae <= arima_mae:

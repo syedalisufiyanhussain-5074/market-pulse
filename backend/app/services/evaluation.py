@@ -1,3 +1,4 @@
+import math
 import warnings
 
 import numpy as np
@@ -54,18 +55,30 @@ def evaluate_models(
 
 
 def _compute_metrics(actuals: np.ndarray, predictions: np.ndarray) -> dict:
+    # Guard: if all predictions are NaN, return infinity metrics
+    if np.all(np.isnan(predictions)):
+        return {"mae": float("inf"), "smape": float("inf"), "mfe": 0.0}
+
     errors = actuals - predictions
     abs_errors = np.abs(errors)
 
-    mae = float(np.mean(abs_errors))
+    mae = float(np.nanmean(abs_errors))
 
     # SMAPE
     denominator = np.abs(actuals) + np.abs(predictions)
     smape_values = np.where(denominator == 0, 0, 2 * abs_errors / denominator)
-    smape = float(np.mean(smape_values) * 100)
+    smape = float(np.nanmean(smape_values) * 100)
 
     # MFE (Mean Forecast Error) - positive means under-forecasting
-    mfe = float(np.mean(errors))
+    mfe = float(np.nanmean(errors))
+
+    # Final NaN guard
+    if math.isnan(mae):
+        mae = float("inf")
+    if math.isnan(smape):
+        smape = float("inf")
+    if math.isnan(mfe):
+        mfe = 0.0
 
     return {"mae": round(mae, 2), "smape": round(smape, 2), "mfe": round(mfe, 2)}
 
