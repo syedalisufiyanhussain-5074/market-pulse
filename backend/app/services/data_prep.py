@@ -27,6 +27,9 @@ HORIZON_BOUNDS = {
 
 MAX_ROWS_FOR_MODELING = 150
 
+# Ordered from finest to coarsest — used to validate frequency overrides
+FREQ_ORDER = ["D", "W", "MS", "QS", "YS"]
+
 # Defines the next coarser frequency for automatic downsampling
 _UPSAMPLE_MAP = {
     "D": "W",
@@ -40,6 +43,8 @@ def prepare_data(
     target_column: str,
     file_hash: str = "",
     parsed_columns: dict | None = None,
+    frequency_override: str | None = None,
+    horizon_override: int | None = None,
 ) -> dict:
     with log_stage(logger, "data_preparation", file_hash=file_hash, row_count=len(df)):
         # Use pre-parsed columns from validator if available, otherwise parse here
@@ -60,7 +65,28 @@ def prepare_data(
         prepared = prepared.groupby("ds", as_index=False)["y"].sum()
 
         # Detect frequency
-        freq_info = _detect_frequency(prepared["ds"])
+        freq_info = detect_frequency(prepared["ds"])
+
+        # Apply user-specified frequency override (must be coarser or equal)
+        if frequency_override and frequency_override in FREQUENCY_MAP:
+            detected_idx = FREQ_ORDER.index(freq_info["alias"])
+            override_idx = FREQ_ORDER.index(frequency_override)
+            if override_idx >= detected_idx and frequency_override != freq_info["alias"]:
+                logger.info(
+                    f"User override: resampling from {freq_info['label']} to "
+                    f"{FREQUENCY_MAP[frequency_override]['label']}",
+                    extra={"file_hash": file_hash},
+                )
+                resampled = prepared.set_index("ds").resample(frequency_override).sum().reset_index()
+                resampled = resampled[resampled["y"] != 0]
+                if len(resampled) >= 3:
+                    prepared = resampled
+                    freq_info = FREQUENCY_MAP[frequency_override]
+                else:
+                    logger.warning(
+                        f"Resampling to {frequency_override} produced only {len(resampled)} rows, keeping detected frequency",
+                        extra={"file_hash": file_hash},
+                    )
 
         # Downsample if too many rows for efficient modeling
         prepared, freq_info = _maybe_downsample(prepared, freq_info, file_hash)
@@ -92,6 +118,14 @@ def prepare_data(
             forecast_horizon = max(min_h, min(max_h, forecast_horizon))
         else:
             forecast_horizon = raw_horizon
+
+        # Apply user-specified horizon override
+        if horizon_override is not None:
+            forecast_horizon = max(1, min(horizon_override, len(prepared)))
+            logger.info(
+                f"User override: horizon set to {forecast_horizon} (requested {horizon_override})",
+                extra={"file_hash": file_hash},
+            )
 
         logger.info(
             f"Prepared: {len(prepared)} rows, freq={freq_info['alias']}, "
@@ -147,7 +181,7 @@ def _maybe_downsample(
     return df, freq_info
 
 
-def _detect_frequency(dates: pd.Series) -> dict:
+def detect_frequency(dates: pd.Series) -> dict:
     if len(dates) < 2:
         return FREQUENCY_MAP["MS"]
 

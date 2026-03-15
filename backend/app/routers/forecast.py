@@ -85,6 +85,8 @@ async def run_forecast(
     date_column: str = Form(...),
     target_column: str = Form(...),
     preference: str = Form(...),
+    frequency: str | None = Form(None),
+    num_predictions: int | None = Form(None),
 ):
     t0 = time.perf_counter()
     session_id = getattr(request.state, "session_id", None)
@@ -93,7 +95,7 @@ async def run_forecast(
             df, file_hash = await parse_upload(file)
             file_cache.put(file_hash, df)
             parsed = validate_data(df, date_column, target_column, file_hash=file_hash)
-            prep_result = prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed)
+            prep_result = prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed, frequency_override=frequency, horizon_override=num_predictions)
             prepared_df = prep_result["df"]
             freq = prep_result["freq"]
             seasonal_period = prep_result["seasonal_period"]
@@ -197,6 +199,8 @@ async def run_forecast_stream(
     date_column: str = Form(...),
     target_column: str = Form(...),
     preference: str = Form(...),
+    frequency: str | None = Form(None),
+    num_predictions: int | None = Form(None),
 ):
     # Read file bytes in async context before entering sync generator
     contents = await file.read()
@@ -236,7 +240,7 @@ async def run_forecast_stream(
             yield _sse("progress", progress=25, message="Preparing time series...")
             prep_result = None
             for item in _run_with_heartbeats(
-                lambda: prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed)
+                lambda: prepare_data(df, date_column, target_column, file_hash=file_hash, parsed_columns=parsed, frequency_override=frequency, horizon_override=num_predictions)
             ):
                 if isinstance(item, str):
                     yield item

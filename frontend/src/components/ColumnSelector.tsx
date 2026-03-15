@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -11,11 +11,63 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
+const FREQ_ORDER = ["D", "W", "MS", "QS", "YS"] as const;
+
+const FREQ_LABELS: Record<string, string> = {
+  D: "Daily",
+  W: "Weekly",
+  MS: "Monthly",
+  QS: "Quarterly",
+  YS: "Yearly",
+};
+
+const PREDICTION_PRESETS: Record<string, number[]> = {
+  D: [7, 14, 21, 30, 60, 90],
+  W: [4, 8, 12, 26, 52],
+  MS: [3, 6, 12, 18, 24, 36],
+  QS: [2, 4, 6, 8, 12],
+  YS: [2, 3, 4, 5],
+};
+
+const HORIZON_BOUNDS: Record<string, [number, number]> = {
+  D: [7, 30],
+  W: [4, 12],
+  MS: [3, 12],
+  QS: [2, 8],
+  YS: [2, 5],
+};
+
+const APPROX_DAYS: Record<string, number> = {
+  D: 1,
+  W: 7,
+  MS: 30,
+  QS: 91,
+  YS: 365,
+};
+
+function estimateRowCount(
+  rawRows: number,
+  detectedFreq: string | null,
+  selectedFreq: string
+): number {
+  if (!detectedFreq || detectedFreq === selectedFreq) return rawRows;
+  const detectedDays = APPROX_DAYS[detectedFreq] || 1;
+  const selectedDays = APPROX_DAYS[selectedFreq] || 1;
+  return Math.floor((rawRows * detectedDays) / selectedDays);
+}
+
 interface ColumnSelectorProps {
   dateColumns: string[];
   numericColumns: string[];
   rowCount: number;
-  onConfirm: (dateColumn: string, targetColumn: string, preference: string) => void;
+  frequencyMap: Record<string, string>;
+  onConfirm: (
+    dateColumn: string,
+    targetColumn: string,
+    preference: string,
+    frequency: string,
+    numPredictions: number,
+  ) => void;
   isLoading: boolean;
 }
 
@@ -23,14 +75,72 @@ export default function ColumnSelector({
   dateColumns,
   numericColumns,
   rowCount,
+  frequencyMap,
   onConfirm,
   isLoading,
 }: ColumnSelectorProps) {
   const [dateColumn, setDateColumn] = useState("");
   const [targetColumn, setTargetColumn] = useState("");
   const [preference, setPreference] = useState("");
+  const [frequency, setFrequency] = useState("");
+  const [numPredictions, setNumPredictions] = useState("");
 
-  const canSubmit = dateColumn && targetColumn && preference && !isLoading;
+  // Detected frequency for the selected date column
+  const detectedFreq = dateColumn ? frequencyMap[dateColumn] ?? null : null;
+
+  // Valid frequencies: detected + all coarser
+  const validFrequencies = useMemo(() => {
+    if (!detectedFreq) return [];
+    const idx = FREQ_ORDER.indexOf(detectedFreq as typeof FREQ_ORDER[number]);
+    if (idx === -1) return [];
+    return FREQ_ORDER.slice(idx);
+  }, [detectedFreq]);
+
+  // Auto-set frequency when date column changes
+  useEffect(() => {
+    if (detectedFreq) {
+      setFrequency(detectedFreq);
+    } else {
+      setFrequency("");
+    }
+  }, [detectedFreq]);
+
+  // Effective row count after potential aggregation
+  const effectiveRows = useMemo(() => {
+    if (!frequency || !detectedFreq) return rowCount;
+    return estimateRowCount(rowCount, detectedFreq, frequency);
+  }, [frequency, rowCount, detectedFreq]);
+
+  // Smart prediction presets filtered by effective data size
+  const predictionOptions = useMemo(() => {
+    if (!frequency) return [];
+    const presets = PREDICTION_PRESETS[frequency] || [];
+    return presets.filter((p) => p <= effectiveRows);
+  }, [frequency, effectiveRows]);
+
+  // Default horizon (mirrors backend 20% rule)
+  const defaultHorizon = useMemo(() => {
+    if (!frequency) return null;
+    const [minH, maxH] = HORIZON_BOUNDS[frequency] || [4, 12];
+    return Math.max(minH, Math.min(maxH, Math.round(effectiveRows * 0.2)));
+  }, [frequency, effectiveRows]);
+
+  // Auto-set predictions when frequency or options change
+  useEffect(() => {
+    if (predictionOptions.length === 0) {
+      setNumPredictions("");
+      return;
+    }
+    // Pick the preset closest to the default horizon
+    const target = defaultHorizon ?? predictionOptions[0];
+    const closest = predictionOptions.reduce((a, b) =>
+      Math.abs(a - target) <= Math.abs(b - target) ? a : b
+    );
+    setNumPredictions(String(closest));
+  }, [predictionOptions, defaultHorizon]);
+
+  const canSubmit =
+    dateColumn && targetColumn && preference && frequency && numPredictions && !isLoading;
 
   return (
     <div className="space-y-6">
@@ -40,38 +150,94 @@ export default function ColumnSelector({
       </div>
 
       <div className="space-y-4">
-        <div className="space-y-2">
-          <Label htmlFor="date-col">Please confirm the date column.</Label>
-          <Select value={dateColumn} onValueChange={setDateColumn}>
-            <SelectTrigger id="date-col" className="bg-black border-white/20">
-              <SelectValue placeholder="Select date column" />
-            </SelectTrigger>
-            <SelectContent>
-              {dateColumns.map((col) => (
-                <SelectItem key={col} value={col}>
-                  {col}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* 2x2 grid: date+freq, target+predictions */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Row 1, Col 1: Date Column */}
+          <div className="space-y-2">
+            <Label htmlFor="date-col">Please confirm the date column.</Label>
+            <Select value={dateColumn} onValueChange={setDateColumn}>
+              <SelectTrigger id="date-col" className="bg-black border-white/20">
+                <SelectValue placeholder="Select date column" />
+              </SelectTrigger>
+              <SelectContent>
+                {dateColumns.map((col) => (
+                  <SelectItem key={col} value={col}>
+                    {col}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Row 1, Col 2: Frequency */}
+          <div className="space-y-2">
+            <Label htmlFor="freq">Data frequency</Label>
+            <Select
+              value={frequency}
+              onValueChange={setFrequency}
+              disabled={!dateColumn}
+            >
+              <SelectTrigger id="freq" className="bg-black border-white/20">
+                <SelectValue placeholder="Select frequency" />
+              </SelectTrigger>
+              <SelectContent>
+                {validFrequencies.map((f) => (
+                  <SelectItem key={f} value={f}>
+                    {FREQ_LABELS[f]}
+                    {f === detectedFreq ? " (detected)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Row 2, Col 1: Target Column */}
+          <div className="space-y-2">
+            <Label htmlFor="target-col">Please select the field to forecast.</Label>
+            <Select value={targetColumn} onValueChange={setTargetColumn}>
+              <SelectTrigger id="target-col" className="bg-black border-white/20">
+                <SelectValue placeholder="Select target column" />
+              </SelectTrigger>
+              <SelectContent>
+                {numericColumns.map((col) => (
+                  <SelectItem key={col} value={col}>
+                    {col}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Row 2, Col 2: Number of Predictions */}
+          <div className="space-y-2">
+            <Label htmlFor="num-pred">Number of predictions</Label>
+            <Select
+              value={numPredictions}
+              onValueChange={setNumPredictions}
+              disabled={!frequency}
+            >
+              <SelectTrigger id="num-pred" className="bg-black border-white/20">
+                <SelectValue placeholder="Select periods" />
+              </SelectTrigger>
+              <SelectContent>
+                {predictionOptions.length > 0 ? (
+                  predictionOptions.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n} {(FREQ_LABELS[frequency] ?? "periods").toLowerCase()}
+                      {n === defaultHorizon ? " (recommended)" : ""}
+                    </SelectItem>
+                  ))
+                ) : (
+                  <SelectItem value="__empty" disabled>
+                    Not enough data for this frequency
+                  </SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="target-col">Please select the field to forecast.</Label>
-          <Select value={targetColumn} onValueChange={setTargetColumn}>
-            <SelectTrigger id="target-col" className="bg-black border-white/20">
-              <SelectValue placeholder="Select target column" />
-            </SelectTrigger>
-            <SelectContent>
-              {numericColumns.map((col) => (
-                <SelectItem key={col} value={col}>
-                  {col}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
+        {/* Preference toggle — full width */}
         <div className="space-y-2">
           <Label>Please confirm your preferred forecasting approach.</Label>
           <div className="grid grid-cols-2 gap-3">
@@ -102,7 +268,9 @@ export default function ColumnSelector({
       </div>
 
       <Button
-        onClick={() => onConfirm(dateColumn, targetColumn, preference)}
+        onClick={() =>
+          onConfirm(dateColumn, targetColumn, preference, frequency, parseInt(numPredictions))
+        }
         disabled={!canSubmit}
         className="w-full bg-white text-black hover:bg-white/90 font-bold border-0"
       >

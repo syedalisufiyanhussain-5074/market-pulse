@@ -98,7 +98,7 @@ export default function Home() {
     }
   };
 
-  const handleConfirm = async (dateColumn: string, targetColumn: string, preference: string) => {
+  const handleConfirm = async (dateColumn: string, targetColumn: string, preference: string, frequency: string, numPredictions: number) => {
     if (!file) return;
     setError(null);
     setStep("loading");
@@ -110,6 +110,8 @@ export default function Home() {
       const data = await runForecastStream(
         file, dateColumn, targetColumn, preference,
         (pct, message) => { setProgress({ pct, message }); setLastEventTime(Date.now()); },
+        frequency,
+        numPredictions,
       );
       setForecastData(data);
       setStep("results");
@@ -228,6 +230,7 @@ export default function Home() {
                 dateColumns={uploadData.date_columns}
                 numericColumns={uploadData.numeric_columns}
                 rowCount={uploadData.row_count}
+                frequencyMap={uploadData.frequency_map}
                 onConfirm={handleConfirm}
                 isLoading={false}
               />

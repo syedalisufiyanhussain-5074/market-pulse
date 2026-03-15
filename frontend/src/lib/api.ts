@@ -39,6 +39,7 @@ export interface UploadResponse {
   preview: Record<string, unknown>[];
   file_hash: string;
   row_count: number;
+  frequency_map: Record<string, string>;
 }
 
 export interface ForecastResponse {
@@ -102,13 +103,17 @@ export async function runForecast(
   file: File,
   dateColumn: string,
   targetColumn: string,
-  preference: string
+  preference: string,
+  frequency?: string,
+  numPredictions?: number,
 ): Promise<ForecastResponse> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("date_column", dateColumn);
   formData.append("target_column", targetColumn);
   formData.append("preference", preference);
+  if (frequency) formData.append("frequency", frequency);
+  if (numPredictions) formData.append("num_predictions", String(numPredictions));
 
   const controller = new AbortController();
   // 120s absolute timeout for non-streaming endpoint
@@ -145,12 +150,16 @@ export async function runForecastStream(
   targetColumn: string,
   preference: string,
   onProgress: (progress: number, message: string) => void,
+  frequency?: string,
+  numPredictions?: number,
 ): Promise<ForecastResponse> {
   const formData = new FormData();
   formData.append("file", file);
   formData.append("date_column", dateColumn);
   formData.append("target_column", targetColumn);
   formData.append("preference", preference);
+  if (frequency) formData.append("frequency", frequency);
+  if (numPredictions) formData.append("num_predictions", String(numPredictions));
 
   const controller = new AbortController();
 
