@@ -165,7 +165,7 @@ export default function Home() {
     <main className="min-h-screen bg-black">
       {/* Header */}
       <header className="border-b border-white/10">
-        <div className="max-w-3xl mx-auto px-6 py-3 flex items-center justify-center relative">
+        <div className="max-w-3xl mx-auto px-6 py-3 flex items-center justify-between">
           <a href="/" className="flex items-center">
             <Image
               src="/logo-horizontal.png"
@@ -180,7 +180,7 @@ export default function Home() {
               variant="ghost"
               size="sm"
               onClick={handleReset}
-              className="absolute right-6 text-white/60 hover:text-white hover:bg-white/5 border border-white/10"
+              className="text-white/60 hover:text-white hover:bg-white/5 border border-white/10"
             >
               <RotateCcw className="w-4 h-4 mr-1" />
               Start Over
