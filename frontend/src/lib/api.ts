@@ -40,6 +40,7 @@ export interface UploadResponse {
   file_hash: string;
   row_count: number;
   frequency_map: Record<string, string>;
+  period_count_map: Record<string, number>;
 }
 
 export interface ForecastResponse {

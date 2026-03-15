@@ -231,6 +231,7 @@ export default function Home() {
                 numericColumns={uploadData.numeric_columns}
                 rowCount={uploadData.row_count}
                 frequencyMap={uploadData.frequency_map}
+                periodCountMap={uploadData.period_count_map}
                 onConfirm={handleConfirm}
                 isLoading={false}
               />

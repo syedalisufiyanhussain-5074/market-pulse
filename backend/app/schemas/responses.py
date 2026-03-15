@@ -8,6 +8,7 @@ class UploadResponse(BaseModel):
     file_hash: str
     row_count: int
     frequency_map: dict[str, str]  # {"Order Date": "D", "Month": "MS"}
+    period_count_map: dict[str, int]  # {"Order Date": 365, "Month": 12}
 
 
 class ForecastResponse(BaseModel):

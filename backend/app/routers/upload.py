@@ -25,8 +25,9 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
 
             columns = detect_columns(df, file_hash=file_hash)
 
-            # Detect frequency for each date column candidate
+            # Detect frequency and unique period count for each date column
             frequency_map = {}
+            period_count_map = {}
             for col in columns["date_columns"]:
                 try:
                     parsed_dates, _ = parse_time_column(df[col])
@@ -34,10 +35,13 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
                     if len(valid_dates) >= 2:
                         freq_info = detect_frequency(valid_dates)
                         frequency_map[col] = freq_info["alias"]
+                        period_count_map[col] = int(valid_dates.nunique())
                     else:
                         frequency_map[col] = "MS"
+                        period_count_map[col] = len(valid_dates)
                 except Exception:
                     frequency_map[col] = "MS"
+                    period_count_map[col] = 0
 
             preview = df.head(5).fillna("").to_dict(orient="records")
 
@@ -56,6 +60,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
                 file_hash=file_hash,
                 row_count=len(df),
                 frequency_map=frequency_map,
+                period_count_map=period_count_map,
             )
     except HTTPException as e:
         duration = round((time.perf_counter() - t0) * 1000, 1)

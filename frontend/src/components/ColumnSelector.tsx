@@ -69,6 +69,7 @@ interface ColumnSelectorProps {
   numericColumns: string[];
   rowCount: number;
   frequencyMap: Record<string, string>;
+  periodCountMap: Record<string, number>;
   onConfirm: (
     dateColumn: string,
     targetColumn: string,
@@ -84,6 +85,7 @@ export default function ColumnSelector({
   numericColumns,
   rowCount,
   frequencyMap,
+  periodCountMap,
   onConfirm,
   isLoading,
 }: ColumnSelectorProps) {
@@ -113,11 +115,14 @@ export default function ColumnSelector({
     }
   }, [detectedFreq]);
 
+  // Unique periods for the selected date column (not raw row count)
+  const detectedPeriods = dateColumn ? periodCountMap[dateColumn] ?? rowCount : rowCount;
+
   // Effective row count after potential aggregation
   const effectiveRows = useMemo(() => {
-    if (!frequency || !detectedFreq) return rowCount;
-    return estimateRowCount(rowCount, detectedFreq, frequency);
-  }, [frequency, rowCount, detectedFreq]);
+    if (!frequency || !detectedFreq) return detectedPeriods;
+    return estimateRowCount(detectedPeriods, detectedFreq, frequency);
+  }, [frequency, detectedPeriods, detectedFreq]);
 
   // Smart prediction presets filtered by effective data size
   const predictionOptions = useMemo(() => {
