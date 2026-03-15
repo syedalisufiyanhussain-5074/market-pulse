@@ -20,7 +20,7 @@ FREQUENCY_MAP = {
 HORIZON_BOUNDS = {
     "D": (7, 30),
     "W": (2, 12),
-    "MS": (1, 6),
+    "MS": (2, 6),
     "QS": (1, 2),
     "YS": (1, 2),
 }

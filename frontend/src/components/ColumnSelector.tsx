@@ -32,7 +32,7 @@ const PREDICTION_PRESETS: Record<string, number[]> = {
 const HORIZON_BOUNDS: Record<string, [number, number]> = {
   D: [7, 30],
   W: [2, 12],
-  MS: [1, 6],
+  MS: [2, 6],
   QS: [1, 2],
   YS: [1, 2],
 };
@@ -130,8 +130,8 @@ export default function ColumnSelector({
   // Default horizon (mirrors backend 20% rule)
   const defaultHorizon = useMemo(() => {
     if (!frequency) return null;
-    const [minH, maxH] = HORIZON_BOUNDS[frequency] || [4, 12];
-    return Math.max(minH, Math.min(maxH, Math.round(effectiveRows * 0.2)));
+    const [minH, maxH] = HORIZON_BOUNDS[frequency] || [2, 12];
+    return Math.max(minH, Math.min(maxH, Math.floor(effectiveRows * 0.25)));
   }, [frequency, effectiveRows]);
 
   // Auto-set predictions when frequency or options change
