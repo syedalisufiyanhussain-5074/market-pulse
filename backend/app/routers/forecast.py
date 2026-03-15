@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import math
 import time
 import threading
 from datetime import datetime
@@ -27,6 +28,17 @@ logger = get_logger("forecast_router")
 router = APIRouter(prefix="/api", tags=["forecast"])
 
 
+def _sanitize(value):
+    """Replace NaN/Inf with None for JSON-safe serialization."""
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    if isinstance(value, dict):
+        return {k: _sanitize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_sanitize(v) for v in value]
+    return value
+
+
 def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference):
     """Build the forecast result dict (shared by both endpoints)."""
     forecasts = model_result["forecasts"]
@@ -38,16 +50,20 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
     lo_col = [c for c in forecasts.columns if sel_model in c and "lo" in c]
     hi_col = [c for c in forecasts.columns if sel_model in c and "hi" in c]
 
+    def _safe_round(val):
+        v = float(val)
+        return None if math.isnan(v) or math.isinf(v) else round(v, 2)
+
     forecast_data = []
     for i, row in forecasts.iterrows():
         entry = {
             "date": row["ds"].isoformat(),
-            "value": round(float(row[pred_col]), 2),
+            "value": _safe_round(row[pred_col]),
         }
         if lo_col:
-            entry["lower_bound"] = round(float(row[lo_col[0]]), 2)
+            entry["lower_bound"] = _safe_round(row[lo_col[0]])
         if hi_col:
-            entry["upper_bound"] = round(float(row[hi_col[0]]), 2)
+            entry["upper_bound"] = _safe_round(row[hi_col[0]])
         forecast_data.append(entry)
 
     historical_data = [
@@ -57,7 +73,7 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
 
     forecast_bias = "Over-Forecast" if preference == "capacity-buffered" else "Under-Forecast"
 
-    return {
+    return _sanitize({
         "selected_model": decision["selected_model"],
         "mae_value": decision["selected_metrics"]["mae"],
         "forecast_horizon": forecast_horizon,
@@ -75,7 +91,7 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
             "Moving Average (Excel)": metrics["Moving Average (Excel)"],
             "ETS (Excel)": metrics["ETS (Excel)"],
         },
-    }
+    })
 
 
 @router.post("/forecast", response_model=ForecastResponse)
