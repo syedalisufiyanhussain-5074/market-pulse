@@ -123,8 +123,7 @@ export default function ColumnSelector({
   const predictionOptions = useMemo(() => {
     if (!frequency) return [];
     const presets = PREDICTION_PRESETS[frequency] || [];
-    const maxAllowed = frequency === "YS" ? effectiveRows * 2 : effectiveRows;
-    return presets.filter((p) => p <= maxAllowed);
+    return presets.filter((p) => p <= effectiveRows);
   }, [frequency, effectiveRows]);
 
   // Default horizon (mirrors backend 20% rule)
