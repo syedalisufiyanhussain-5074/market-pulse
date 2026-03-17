@@ -29,3 +29,4 @@ class ExcelExportRequest(BaseModel):
     historical_data: list[dict]
     frequency: str
     forecast_bias: str = "Forecast"
+    comparison_forecasts: dict[str, list[float]] | None = None

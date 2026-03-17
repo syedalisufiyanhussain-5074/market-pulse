@@ -57,6 +57,7 @@ export interface ForecastResponse {
   forecast_bias: string;
   metrics: Record<string, { mae: number; smape: number; mfe: number }>;
   metrics_source: string;
+  comparison_forecasts?: Record<string, number[]>;
 }
 
 function extractError(detail: unknown, fallback: string): AppError {
@@ -295,6 +296,7 @@ export async function exportExcel(data: ForecastResponse): Promise<Blob> {
       historical_data: data.historical_data,
       frequency: data.frequency,
       forecast_bias: data.forecast_bias,
+      comparison_forecasts: data.comparison_forecasts ?? null,
     }),
   });
 

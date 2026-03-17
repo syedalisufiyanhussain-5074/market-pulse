@@ -39,7 +39,7 @@ def _sanitize(value):
     return value
 
 
-def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source="cross_validation"):
+def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source="cross_validation", excel_ets_forecast=None):
     """Build the forecast result dict (shared by both endpoints)."""
     forecasts = model_result["forecasts"]
     sel_model = decision["selected_model"]
@@ -73,6 +73,34 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
 
     forecast_bias = "Over-Forecast" if preference == "capacity-buffered" else "Under-Forecast"
 
+    # Build comparison_forecasts: all 4 models' forecast arrays
+    import numpy as np
+    comparison_forecasts = {}
+    for model_name in ["AutoETS", "AutoARIMA"]:
+        col = [c for c in forecasts.columns if model_name in c and "lo" not in c and "hi" not in c]
+        if col:
+            vals = forecasts[col[0]].values
+            comparison_forecasts[model_name] = [_safe_round(v) for v in vals]
+
+    # Moving Average: flat line = mean of last `window` historical values
+    y_values = prepared_df["y"].values
+    window = min(forecast_horizon, len(y_values) - forecast_horizon)
+    if window > 0:
+        ma_val = float(np.mean(y_values[-window:]))
+    else:
+        ma_val = float(np.mean(y_values))
+    comparison_forecasts["Moving Average (Excel)"] = [round(ma_val, 2)] * forecast_horizon
+
+    # ETS (Excel): use the pre-computed forecast array
+    if excel_ets_forecast is not None:
+        comparison_forecasts["ETS (Excel)"] = [_safe_round(v) for v in excel_ets_forecast[:forecast_horizon]]
+
+    # Validate alignment: all arrays must have same length
+    lengths = {k: len(v) for k, v in comparison_forecasts.items()}
+    if len(set(lengths.values())) > 1:
+        logger.warning(f"Comparison forecast length mismatch: {lengths}")
+        comparison_forecasts = None  # fail gracefully
+
     return _sanitize({
         "selected_model": decision["selected_model"],
         "mae_value": decision["selected_metrics"]["mae"],
@@ -92,6 +120,7 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
             "ETS (Excel)": metrics["ETS (Excel)"],
         },
         "metrics_source": metrics_source,
+        "comparison_forecasts": comparison_forecasts,
     })
 
 
@@ -152,7 +181,7 @@ async def run_forecast(
             )
 
             metrics_source = model_result.get("metrics_source", "cross_validation")
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source)
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast)
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
@@ -333,7 +362,7 @@ async def run_forecast_stream(
 
             yield _sse("progress", progress=98, message="Finalizing your forecast...")
             metrics_source = model_result.get("metrics_source", "cross_validation")
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source)
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast)
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
@@ -417,6 +446,7 @@ async def export_excel(http_request: Request, request: ExcelExportRequest):
         forecast_data=request.forecast_data,
         frequency=request.frequency,
         forecast_bias=request.forecast_bias,
+        comparison_forecasts=request.comparison_forecasts,
     )
 
     filename = f"MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_Report.xlsx"

@@ -25,3 +25,4 @@ class ForecastResponse(BaseModel):
     forecast_bias: str
     metrics: dict
     metrics_source: str  # "cross_validation" or "in_sample"
+    comparison_forecasts: dict[str, list[float]] | None = None
