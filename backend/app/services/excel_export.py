@@ -98,29 +98,27 @@ def generate_excel(
 
     # Title row (row 3) with same border as table
     title_font = Font(name="Calibri", bold=True, size=14, color="1F2937")
-    ws.merge_cells("A3:E3")
     ws["A3"] = f"Market Pulse — {model_display} {forecast_bias} ({freq_label})"
     ws["A3"].font = title_font
     ws["A3"].alignment = Alignment(horizontal="left", vertical="center")
     ws.row_dimensions[3].height = 20.5
-    for col_idx in range(1, 6):
-        ws.cell(row=3, column=col_idx).border = thin_border
 
-    # Headers (row 5)
+    # Headers (row 4)
+    left_align = Alignment(horizontal="left", vertical="center")
     headers = ["Date", "Actual", "Forecast", "Lower Bound", "Upper Bound"]
     for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=5, column=col_idx, value=header)
+        cell = ws.cell(row=4, column=col_idx, value=header)
         cell.font = header_font
         cell.fill = header_fill
-        cell.alignment = header_align
+        cell.alignment = left_align if col_idx == 1 else header_align
         cell.border = thin_border
 
     # Historical data
-    row = 6
+    row = 5
     for entry in historical_data:
         date_str = _format_date(entry["date"], frequency)
         ws.cell(row=row, column=1, value=date_str).font = data_font
-        ws.cell(row=row, column=1).alignment = data_align
+        ws.cell(row=row, column=1).alignment = left_align
         ws.cell(row=row, column=1).border = thin_border
 
         val_cell = ws.cell(row=row, column=2, value=entry["value"])
@@ -139,7 +137,7 @@ def generate_excel(
     for entry in forecast_data:
         date_str = _format_date(entry["date"], frequency)
         ws.cell(row=row, column=1, value=date_str).font = data_font
-        ws.cell(row=row, column=1).alignment = data_align
+        ws.cell(row=row, column=1).alignment = left_align
         ws.cell(row=row, column=1).border = thin_border
 
         # Actual column blank for forecast
@@ -206,30 +204,29 @@ def generate_excel(
 
         # Title row (row 3)
         title_font2 = Font(name="Calibri", bold=True, size=14, color="1F2937")
-        ws2.merge_cells("A3:F3")
         ws2["A3"] = f"Market Pulse — Model Comparison ({freq_label})"
         ws2["A3"].font = title_font2
         ws2["A3"].alignment = Alignment(horizontal="left", vertical="center")
         ws2.row_dimensions[3].height = 20.5
-        for col_idx in range(1, 7):
-            ws2.cell(row=3, column=col_idx).border = thin_border
 
-        # Headers (row 5): Date | Actual | AutoETS | AutoARIMA | Moving Average (Excel) | ETS (Excel)
+        # Headers (row 4): Date | Actual | AutoETS | AutoARIMA | Moving Average (Excel) | ETS (Excel)
+        left_align_hdr = Alignment(horizontal="left", vertical="center")
         comp_headers = ["Date", "Actual"] + MODEL_ORDER
         for col_idx, hdr in enumerate(comp_headers, 1):
-            cell = ws2.cell(row=5, column=col_idx, value=hdr)
+            cell = ws2.cell(row=4, column=col_idx, value=hdr)
             cell.font = header_font
             cell.fill = header_fill
-            cell.alignment = header_align
+            cell.alignment = left_align_hdr if col_idx == 1 else header_align
             cell.border = thin_border
 
         # Historical data rows
-        r2 = 6
+        r2 = 5
         num_model_cols = len(MODEL_ORDER)
+        left_align2 = Alignment(horizontal="left", vertical="center")
         for entry in historical_data:
             date_str = _format_date(entry["date"], frequency)
             ws2.cell(row=r2, column=1, value=date_str).font = data_font
-            ws2.cell(row=r2, column=1).alignment = data_align
+            ws2.cell(row=r2, column=1).alignment = left_align2
             ws2.cell(row=r2, column=1).border = thin_border
 
             val_cell = ws2.cell(row=r2, column=2, value=entry["value"])
@@ -248,7 +245,7 @@ def generate_excel(
         for idx, entry in enumerate(forecast_data):
             date_str = _format_date(entry["date"], frequency)
             ws2.cell(row=r2, column=1, value=date_str).font = data_font
-            ws2.cell(row=r2, column=1).alignment = data_align
+            ws2.cell(row=r2, column=1).alignment = left_align2
             ws2.cell(row=r2, column=1).border = thin_border
 
             # Actual column blank

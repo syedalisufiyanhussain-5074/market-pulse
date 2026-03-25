@@ -17,6 +17,9 @@ def select_best_model(
     metrics: dict,
     preference: str,
     file_hash: str = "",
+    model_params: dict | None = None,
+    seasonal_period: int | None = None,
+    has_seasonality: bool = False,
 ) -> dict:
     with log_stage(logger, "decision", file_hash=file_hash):
         ets_metrics = metrics["AutoETS"]
@@ -27,20 +30,42 @@ def select_best_model(
         ets_mae = ets_metrics["mae"] if not math.isnan(ets_metrics["mae"]) else float("inf")
         arima_mae = arima_metrics["mae"] if not math.isnan(arima_metrics["mae"]) else float("inf")
 
-        # Step 1: Select model with lowest MAE
-        if ets_mae <= arima_mae:
+        # Step 0: Structural check — disqualify random walk ARIMA on seasonal data
+        # ARIMA(0,1,0) with no seasonal component is a random walk that cannot
+        # forecast patterns. If data is genuinely seasonal and ETS captured it,
+        # prefer ETS regardless of MAE.
+        arima_disqualified = False
+        arima_order = (model_params or {}).get("arima", {}).get("order", (0, 0, 0))
+        arima_seasonal = (model_params or {}).get("arima", {}).get("seasonal_order", (0, 0, 0, 0))
+        ets_seasonal = (model_params or {}).get("ets", {}).get("seasonal")
+        is_random_walk = (tuple(arima_order) == (0, 1, 0) and
+                          arima_seasonal[0] == 0 and arima_seasonal[1] == 0 and arima_seasonal[2] == 0)
+
+        if is_random_walk and has_seasonality and ets_seasonal is not None:
+            logger.info(
+                f"ARIMA(0,1,0) cannot forecast seasonal patterns — deferring to seasonal ETS "
+                f"(ETS seasonal={ets_seasonal})",
+                extra={"file_hash": file_hash},
+            )
             selected, alternative = "AutoETS", "AutoARIMA"
             selected_metrics, alt_metrics = ets_metrics, arima_metrics
-        else:
-            selected, alternative = "AutoARIMA", "AutoETS"
-            selected_metrics, alt_metrics = arima_metrics, ets_metrics
+            arima_disqualified = True
 
-        # Step 2: If MAE difference < 3%, use preference tie-breaking
-        mae_diff_ratio = abs(ets_mae - arima_mae) / max(ets_mae, arima_mae, 1e-10)
-        if mae_diff_ratio < MAE_TIE_THRESHOLD:
-            selected, selected_metrics, alternative, alt_metrics = _apply_preference(
-                ets_metrics, arima_metrics, preference
-            )
+        if not arima_disqualified:
+            # Step 1: Select model with lowest MAE
+            if ets_mae <= arima_mae:
+                selected, alternative = "AutoETS", "AutoARIMA"
+                selected_metrics, alt_metrics = ets_metrics, arima_metrics
+            else:
+                selected, alternative = "AutoARIMA", "AutoETS"
+                selected_metrics, alt_metrics = arima_metrics, ets_metrics
+
+            # Step 2: If MAE difference < 3%, use preference tie-breaking
+            mae_diff_ratio = abs(ets_mae - arima_mae) / max(ets_mae, arima_mae, 1e-10)
+            if mae_diff_ratio < MAE_TIE_THRESHOLD:
+                selected, selected_metrics, alternative, alt_metrics = _apply_preference(
+                    ets_metrics, arima_metrics, preference
+                )
 
         # Generate summaries with display names
         selected_display = DISPLAY_NAMES.get(selected, selected)
@@ -54,9 +79,12 @@ def select_best_model(
             ma_metrics, excel_ets_metrics
         )
 
+        log_reason = "arima_disqualified" if arima_disqualified else (
+            f"tie={mae_diff_ratio < MAE_TIE_THRESHOLD}" if not arima_disqualified else ""
+        )
         logger.info(
             f"Selected: {selected} (MAE={selected_metrics['mae']:.2f}), "
-            f"preference={preference}, tie={mae_diff_ratio < MAE_TIE_THRESHOLD}",
+            f"preference={preference}, {log_reason}",
             extra={"file_hash": file_hash},
         )
 

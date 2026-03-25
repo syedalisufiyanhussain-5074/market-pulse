@@ -18,14 +18,15 @@ FREQUENCY_MAP = {
 
 # Per-frequency forecast horizon bounds (min, max periods)
 HORIZON_BOUNDS = {
-    "D": (7, 30),
-    "W": (2, 12),
-    "MS": (2, 6),
-    "QS": (1, 2),
-    "YS": (1, 1),
+    "D": (7, 365),
+    "W": (2, 52),
+    "MS": (2, 36),
+    "QS": (1, 8),
+    "YS": (1, 5),
 }
 
 MAX_ROWS_FOR_MODELING = 150
+MAX_MISSING_DATE_RATIO = 0.05
 
 # Approximate days per period — used to scale horizon after downsampling
 APPROX_DAYS = {"D": 1, "W": 7, "MS": 30, "QS": 91, "YS": 365}
@@ -38,6 +39,50 @@ _UPSAMPLE_MAP = {
     "D": "W",
     "W": "MS",
 }
+
+
+def _is_irregular(dates: pd.Series) -> bool:
+    """Check if date spacing is too inconsistent for any regular frequency."""
+    diffs = dates.diff().dropna().dt.days
+    if len(diffs) < 2:
+        return False
+    median = diffs.median()
+    if median == 0:
+        return True
+    cv = diffs.std() / median
+    return cv > 0.5
+
+
+def _validate_date_gaps(df: pd.DataFrame, freq_alias: str, file_hash: str = "") -> None:
+    """Reject data with >5% missing dates based on detected frequency."""
+    if len(df) < 2:
+        return
+
+    date_range = pd.date_range(start=df["ds"].min(), end=df["ds"].max(), freq=freq_alias)
+    expected_count = len(date_range)
+    actual_count = len(df)
+    missing_dates = expected_count - actual_count
+
+    if missing_dates <= 0:
+        return
+
+    missing_ratio = missing_dates / expected_count
+    if missing_ratio > MAX_MISSING_DATE_RATIO:
+        logger.warning(
+            f"Excessive date gaps: {missing_dates}/{expected_count} periods missing ({missing_ratio:.1%})",
+            extra={"file_hash": file_hash},
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": (
+                    f"The dataset contains {missing_dates} missing time periods out of {expected_count} expected "
+                    f"({missing_ratio:.0%}), exceeding the 5% allowable threshold. "
+                    f"Please fill in the missing periods or upload a more complete dataset to proceed."
+                ),
+                "error_code": "EXCESSIVE_DATE_GAPS",
+            },
+        )
 
 
 def prepare_data(
@@ -59,16 +104,101 @@ def prepare_data(
             parsed_dates, _ = parse_time_column(df[date_column])
             prepared["ds"] = parsed_dates
             prepared["y"] = pd.to_numeric(df[target_column], errors="coerce")
+        # Infer missing dates from position + frequency before dropping anything
+        has_date = prepared["ds"].notna()
+        if has_date.any() and not has_date.all():
+            nat_count = (~has_date).sum()
+            nat_ratio = nat_count / len(prepared)
+
+            # Reject if >5% dates are missing (same threshold as _validate_date_gaps)
+            if nat_ratio > 0.05:
+                expected_count = len(prepared)
+                pct = int(round(nat_ratio * 100))
+                logger.warning(
+                    f"Excessive date gaps: {nat_count}/{expected_count} periods missing ({nat_ratio:.1%})",
+                    extra={"file_hash": file_hash},
+                )
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "message": (
+                            f"The dataset contains {nat_count} missing time periods out of {expected_count} expected "
+                            f"({pct}%), exceeding the 5% allowable threshold. "
+                            f"Please fill in the missing periods or upload a more complete dataset to proceed."
+                        ),
+                        "error_code": "EXCESSIVE_DATE_GAPS",
+                    },
+                )
+
+            # Detect frequency from rows that have valid dates
+            valid_dates = prepared.loc[has_date, "ds"].sort_values().reset_index(drop=True)
+            freq_guess = detect_frequency(valid_dates)
+            freq_alias = freq_guess["alias"]
+
+            # Build expected date sequence from the first valid date
+            first_valid_idx = has_date.idxmax()
+            first_valid_date = prepared.loc[first_valid_idx, "ds"]
+
+            # Infer dates for NaT rows based on position relative to first valid date
+            for i in range(len(prepared)):
+                if pd.isna(prepared.loc[i, "ds"]):
+                    offset = i - first_valid_idx
+                    prepared.loc[i, "ds"] = first_valid_date + offset * pd.tseries.frequencies.to_offset(freq_alias)
+
         prepared = prepared.dropna(subset=["ds"])
 
         # Sort chronologically
         prepared = prepared.sort_values("ds").reset_index(drop=True)
 
-        # Aggregate duplicate dates using SUM
-        prepared = prepared.groupby("ds", as_index=False)["y"].sum()
+        # Aggregate duplicate dates using SUM (min_count=1 preserves NaN)
+        prepared = prepared.groupby("ds", as_index=False)["y"].sum(min_count=1)
 
         # Detect frequency
         freq_info = detect_frequency(prepared["ds"])
+
+        # Validate: reject data with >5% date gaps; auto-resample if irregular
+        try:
+            _validate_date_gaps(prepared, freq_info["alias"], file_hash)
+        except HTTPException as e:
+            detail = e.detail if isinstance(e.detail, dict) else {}
+            if detail.get("error_code") == "EXCESSIVE_DATE_GAPS" and _is_irregular(prepared["ds"]):
+                # Try auto-resample to monthly
+                resampled = prepared.set_index("ds").resample("MS").mean(numeric_only=True).reset_index()
+                resampled = resampled.dropna(subset=["y"])
+                if len(resampled) >= 12:
+                    logger.info(
+                        f"Irregular data auto-resampled to monthly ({len(resampled)} rows)",
+                        extra={"file_hash": file_hash},
+                    )
+                    prepared = resampled
+                    freq_info = FREQUENCY_MAP["MS"]
+                    # Re-validate after resample
+                    _validate_date_gaps(prepared, freq_info["alias"], file_hash)
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "message": (
+                                "The dataset has irregular time intervals that cannot be automatically resampled. "
+                                "Market Pulse requires regularly spaced data (e.g., every month, every week). "
+                                "Please resample your data to a consistent frequency before uploading."
+                            ),
+                            "error_code": "IRREGULAR_INTERVALS",
+                        },
+                    )
+            else:
+                raise
+
+        # Reindex to fill missing dates with NaN values (enables interpolation)
+        # Use infer_freq for exact anchor (e.g., W-MON vs W-SUN), fall back to detected alias
+        _exact_freq = pd.infer_freq(prepared["ds"]) or freq_info["alias"]
+        full_index = pd.date_range(
+            start=prepared["ds"].min(),
+            end=prepared["ds"].max(),
+            freq=_exact_freq,
+        )
+        prepared = prepared.set_index("ds").reindex(full_index).reset_index()
+        prepared = prepared.rename(columns={"index": "ds"})
 
         # Apply user-specified frequency override (must be coarser or equal)
         if frequency_override and frequency_override in FREQUENCY_MAP:
@@ -80,7 +210,7 @@ def prepare_data(
                     f"{FREQUENCY_MAP[frequency_override]['label']}",
                     extra={"file_hash": file_hash},
                 )
-                resampled = prepared.set_index("ds").resample(frequency_override).sum().reset_index()
+                resampled = prepared.set_index("ds").resample(frequency_override).sum(min_count=1).reset_index()
                 resampled = resampled[resampled["y"] != 0]
                 if len(resampled) >= 3:
                     prepared = resampled
@@ -144,7 +274,7 @@ def prepare_data(
 
         # Guarantee CV can produce at least one valid training window
         # CV needs: len(data) - horizon >= horizon → horizon <= len(data) // 2
-        max_cv_horizon = max(1, len(prepared) // 2)
+        max_cv_horizon = max(1, -(-len(prepared) // 2))  # ceil division
         if forecast_horizon > max_cv_horizon:
             logger.info(
                 f"Horizon clamped from {forecast_horizon} to {max_cv_horizon} "
@@ -184,7 +314,7 @@ def _maybe_downsample(
             extra={"file_hash": file_hash},
         )
 
-        resampled = df.set_index("ds").resample(target_alias).sum().reset_index()
+        resampled = df.set_index("ds").resample(target_alias).sum(min_count=1).reset_index()
         resampled = resampled[resampled["y"] != 0]  # drop periods with no data
         if len(resampled) == 0:
             logger.warning(

@@ -71,10 +71,15 @@ def _validate_target_column(numeric_series: pd.Series, file_hash: str) -> None:
             f"Excessive missing values: {missing}/{total} ({missing_ratio:.1%})",
             extra={"file_hash": file_hash},
         )
+        pct = int(round(missing_ratio * 100))
         raise HTTPException(
             status_code=400,
             detail={
-                "message": "Too many missing values in your data. Fill in the gaps or use a more complete dataset.",
+                "message": (
+                    f"The dataset contains {missing} missing values out of {total} expected "
+                    f"({pct}%), exceeding the 5% allowable threshold. "
+                    f"Please fill in the missing values or upload a more complete dataset to proceed."
+                ),
                 "error_code": "EXCESSIVE_MISSING",
             },
         )

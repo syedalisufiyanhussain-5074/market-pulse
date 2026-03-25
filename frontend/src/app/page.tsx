@@ -203,10 +203,10 @@ export default function Home() {
           <div className="space-y-6">
             <div className="text-center space-y-2">
               <h2 className="text-2xl font-bold tracking-tight text-white">
-                Upload your dataset
+                Upload your data
               </h2>
               <p className="text-white/50">
-                Get AI-powered demand and price forecasts in seconds.
+                Get AI-powered demand and price forecasts.
               </p>
             </div>
             <FileUploader onFileSelect={handleFileSelect} isLoading={isUploading} />

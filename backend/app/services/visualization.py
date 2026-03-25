@@ -63,7 +63,7 @@ def _fig_to_base64(fig: plt.Figure) -> str:
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
-def _apply_dark_theme(ax: plt.Axes, fig: plt.Figure, freq: str | None = None) -> None:
+def _apply_dark_theme(ax: plt.Axes, fig: plt.Figure, freq: str | None = None, n_points: int | None = None) -> None:
     fig.set_facecolor(BG_COLOR)
     ax.set_facecolor(CARD_COLOR)
     ax.tick_params(colors=TEXT_COLOR, labelsize=10, width=0.5)
@@ -73,10 +73,14 @@ def _apply_dark_theme(ax: plt.Axes, fig: plt.Figure, freq: str | None = None) ->
     for spine in ax.spines.values():
         spine.set_color(GRID_COLOR)
     ax.grid(True, color=GRID_COLOR, alpha=0.4, linewidth=0.5)
-    if freq == "QS":
-        ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
-    elif freq == "YS":
-        ax.xaxis.set_major_locator(mdates.YearLocator())
+    MAX_TICKS = 10
+    if n_points and n_points > MAX_TICKS:
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator(maxticks=MAX_TICKS))
+    else:
+        if freq == "QS":
+            ax.xaxis.set_major_locator(mdates.MonthLocator(bymonth=[1, 4, 7, 10]))
+        elif freq == "YS":
+            ax.xaxis.set_major_locator(mdates.YearLocator())
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
     # Format Y axis: white, bold, comma-separated numbers
     ax.yaxis.set_major_formatter(mticker.FuncFormatter(lambda x, p: f"{x:,.0f}"))
@@ -97,7 +101,6 @@ def _generate_selected_chart(
     freq: str = "MS",
 ) -> str:
     fig, ax = plt.subplots(figsize=(12, 5))
-    _apply_dark_theme(ax, fig, freq=freq)
 
     dates = historical_df["ds"]
     values = historical_df["y"]
@@ -105,6 +108,8 @@ def _generate_selected_chart(
     # Ensure minimum 12 predictions with >=25% forecast space
     forecast_dates = forecasts["ds"]
     total_points = len(dates) + len(forecast_dates)
+
+    _apply_dark_theme(ax, fig, freq=freq, n_points=total_points)
 
     # Trim historical data if forecast occupies <25% of graph space
     min_forecast_ratio = 0.25
@@ -153,11 +158,6 @@ def _generate_selected_chart(
             alpha=0.5,
         )
 
-    # For yearly data, explicitly set ticks at all data + forecast points
-    if freq == "YS":
-        all_dates = list(dates) + list(forecast_dates)
-        ax.set_xticks(all_dates)
-
     ax.set_xlabel("")
     # No Y axis label, no title
 
@@ -202,13 +202,14 @@ def _generate_comparison_chart(
     freq: str = "MS",
 ) -> str:
     fig, ax = plt.subplots(figsize=(12, 5))
-    _apply_dark_theme(ax, fig, freq=freq)
 
     dates = historical_df["ds"]
     values = historical_df["y"]
 
     forecast_dates = forecasts["ds"]
     total_points = len(dates) + len(forecast_dates)
+
+    _apply_dark_theme(ax, fig, freq=freq, n_points=total_points)
 
     # Trim historical data if forecast occupies <25% of graph space
     min_forecast_ratio = 0.25
@@ -286,11 +287,6 @@ def _generate_comparison_chart(
             [last_value, excel_ets_forecast[0]],
             color=EXCEL_ETS_COLOR, linewidth=1.5, linestyle="--", alpha=0.5,
         )
-
-    # For yearly data, explicitly set ticks at all data + forecast points
-    if freq == "YS":
-        all_dates = list(dates) + list(forecast_dates)
-        ax.set_xticks(all_dates)
 
     ax.set_xlabel("")
     # No Y axis label, no title

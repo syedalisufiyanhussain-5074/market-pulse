@@ -21,20 +21,21 @@ const FREQ_LABELS: Record<string, string> = {
   YS: "Yearly",
 };
 
-const PREDICTION_PRESETS: Record<string, number[]> = {
-  D: [7, 14, 21, 30, 60, 90],
-  W: [2, 4, 8, 12, 26],
-  MS: [1, 2, 3, 6, 9, 12],
-  QS: [1, 2, 3, 4],
-  YS: [1, 2, 3],
+// Base presets per frequency — extended dynamically up to 50% of data
+const BASE_PRESETS: Record<string, number[]> = {
+  D: [7, 14, 21, 30, 60, 90, 120, 180, 365],
+  W: [2, 4, 8, 12, 26, 52],
+  MS: [1, 2, 3, 6, 9, 12, 18, 24, 36],
+  QS: [1, 2, 3, 4, 6, 8],
+  YS: [1, 2, 3, 5],
 };
 
 const HORIZON_BOUNDS: Record<string, [number, number]> = {
-  D: [7, 30],
-  W: [2, 12],
-  MS: [2, 6],
-  QS: [1, 2],
-  YS: [1, 1],
+  D: [7, 365],
+  W: [2, 52],
+  MS: [2, 36],
+  QS: [1, 8],
+  YS: [1, 5],
 };
 
 const FREQ_UNITS: Record<string, [string, string]> = {
@@ -61,7 +62,7 @@ function estimateRowCount(
   if (!detectedFreq || detectedFreq === selectedFreq) return rawRows;
   const detectedDays = APPROX_DAYS[detectedFreq] || 1;
   const selectedDays = APPROX_DAYS[selectedFreq] || 1;
-  return Math.floor((rawRows * detectedDays) / selectedDays);
+  return Math.ceil((rawRows * detectedDays) / selectedDays);
 }
 
 interface ColumnSelectorProps {
@@ -127,8 +128,9 @@ export default function ColumnSelector({
   // Smart prediction presets filtered by effective data size
   const predictionOptions = useMemo(() => {
     if (!frequency) return [];
-    const presets = PREDICTION_PRESETS[frequency] || [];
-    return presets.filter((p) => p <= effectiveRows);
+    const presets = BASE_PRESETS[frequency] || [];
+    const maxHorizon = Math.ceil(effectiveRows / 2);  // 50% cap, rounded up
+    return presets.filter((p) => p <= maxHorizon);
   }, [frequency, effectiveRows]);
 
   // Default horizon (mirrors backend 20% rule)

@@ -31,7 +31,7 @@ async def upload_file(request: Request, file: UploadFile = File(...)):
             for col in columns["date_columns"]:
                 try:
                     parsed_dates, _ = parse_time_column(df[col])
-                    valid_dates = parsed_dates.dropna().sort_values()
+                    valid_dates = parsed_dates.dropna().drop_duplicates().sort_values().reset_index(drop=True)
                     if len(valid_dates) >= 2:
                         freq_info = detect_frequency(valid_dates)
                         frequency_map[col] = freq_info["alias"]

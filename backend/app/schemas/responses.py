@@ -26,3 +26,4 @@ class ForecastResponse(BaseModel):
     metrics: dict
     metrics_source: str  # "cross_validation" or "in_sample"
     comparison_forecasts: dict[str, list[float]] | None = None
+    model_params: dict | None = None

@@ -5,7 +5,7 @@ from app.utils.logger import get_logger, log_stage
 
 logger = get_logger("column_detector")
 
-NUMERIC_DENSITY_THRESHOLD = 0.95
+NUMERIC_DENSITY_THRESHOLD = 0.50
 
 
 def detect_columns(df: pd.DataFrame, file_hash: str = "") -> dict:
@@ -41,6 +41,14 @@ def _is_date_column(series: pd.Series) -> bool:
     if pd.api.types.is_datetime64_any_dtype(series):
         return True
     if pd.api.types.is_numeric_dtype(series):
+        # Check if values look like years (e.g., 2020, 2021, 2022)
+        clean = series.dropna()
+        if len(clean) >= 3:
+            vals = clean.astype(float)
+            all_integer = (vals == vals.astype(int)).all()
+            in_range = (vals >= 1900).all() and (vals <= 2100).all()
+            if all_integer and in_range:
+                return True
         return False
     # Sample first for speed, full validation only if sample passes
     if len(series) > _SAMPLE_SIZE:

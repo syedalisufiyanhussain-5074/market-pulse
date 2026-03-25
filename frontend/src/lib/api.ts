@@ -58,6 +58,7 @@ export interface ForecastResponse {
   metrics: Record<string, { mae: number; smape: number; mfe: number }>;
   metrics_source: string;
   comparison_forecasts?: Record<string, number[]>;
+  model_params?: Record<string, unknown>;
 }
 
 function extractError(detail: unknown, fallback: string): AppError {
@@ -302,6 +303,47 @@ export async function exportExcel(data: ForecastResponse): Promise<Blob> {
 
   if (!res.ok) {
     throw new Error("Unable to generate Excel file. Please try again.");
+  }
+
+  return res.blob();
+}
+
+export async function exportIndependentValidation(data: ForecastResponse): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/export/independent-validation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Session-ID": getSessionId() },
+    body: JSON.stringify({
+      historical_data: data.historical_data,
+      forecast_data: data.forecast_data,
+      comparison_forecasts: data.comparison_forecasts ?? {},
+      frequency: data.frequency,
+      metrics: data.metrics,
+      selected_model: data.selected_model,
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Unable to generate Independent Validation file. Please try again.");
+  }
+
+  return res.blob();
+}
+
+export async function exportManualValidation(data: ForecastResponse): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/export/manual-validation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Session-ID": getSessionId() },
+    body: JSON.stringify({
+      historical_data: data.historical_data,
+      forecast_data: data.forecast_data,
+      comparison_forecasts: data.comparison_forecasts ?? {},
+      frequency: data.frequency,
+      model_params: data.model_params ?? {},
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Unable to generate Manual Validation file. Please try again.");
   }
 
   return res.blob();

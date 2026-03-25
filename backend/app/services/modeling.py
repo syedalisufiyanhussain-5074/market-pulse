@@ -13,6 +13,33 @@ ETS_TREND_OPTIONS = ["add", "mul", None]
 ETS_SEASONAL_OPTIONS = ["add", "mul", None]
 
 
+def _safe_param(params, key):
+    """Safely extract a parameter, returning None if missing or NaN."""
+    try:
+        val = params.get(key, None) if hasattr(params, 'get') else params[key]
+        if val is not None and not np.isnan(val):
+            return round(float(val), 6)
+    except (KeyError, IndexError, TypeError, ValueError):
+        pass
+    return None
+
+
+def _has_seasonality(y: np.ndarray, m: int) -> bool:
+    """Lightweight check: autocorrelation at seasonal lag > 0.3 after detrending."""
+    if len(y) < 2 * m:
+        return False
+    x = np.arange(len(y))
+    slope, intercept = np.polyfit(x, y, 1)
+    detrended = y - (slope * x + intercept)
+    n = len(detrended)
+    mean = np.mean(detrended)
+    var = np.var(detrended)
+    if var < 1e-10:
+        return False
+    autocorr = np.sum((detrended[:n-m] - mean) * (detrended[m:] - mean)) / (n * var)
+    return abs(autocorr) > 0.3
+
+
 def _calc_n_windows(y_len: int) -> int:
     max_windows = 3 if y_len > 200 else 5
     n_windows = min(max_windows, y_len // 3)
@@ -54,8 +81,8 @@ def build_forecast_df(
     file_hash: str = "",
 ) -> dict:
     """Combine ETS + ARIMA results into forecasts DataFrame + cv_results."""
-    ets_cv_tuple, ets_forecast, ets_conf = ets_result
-    arima_cv_tuple, arima_forecast, arima_conf = arima_result
+    ets_cv_tuple, ets_forecast, ets_conf, ets_params = ets_result
+    arima_cv_tuple, arima_forecast, arima_conf, arima_params = arima_result
 
     # Unpack CV results and source flags
     ets_cv, ets_source = ets_cv_tuple
@@ -89,6 +116,10 @@ def build_forecast_df(
         "forecasts": forecasts,
         "cv_results": cv_results,
         "metrics_source": metrics_source,
+        "model_params": {
+            "ets": ets_params,
+            "arima": arima_params,
+        },
     }
 
 
@@ -142,6 +173,7 @@ def _fit_auto_ets(
     cv_results, ets_cv_source = _rolling_cv_ets(y, best_model, sp, horizon, n_windows)
 
     # Final forecast
+    ets_params = {}
     try:
         trend, seasonal = best_model if best_model else (None, None)
         with warnings.catch_warnings():
@@ -155,6 +187,18 @@ def _fit_auto_ets(
         residual_std = np.std(final_model.resid)
         if np.isnan(residual_std) or residual_std == 0:
             residual_std = max(float(np.std(y)), 1e-10)
+
+        # Extract fitted parameters for manual validation
+        ets_params = {
+            "alpha": _safe_param(final_model.params, "smoothing_level"),
+            "beta": _safe_param(final_model.params, "smoothing_trend"),
+            "gamma": _safe_param(final_model.params, "smoothing_seasonal"),
+            "l0": _safe_param(final_model.params, "initial_level"),
+            "b0": _safe_param(final_model.params, "initial_trend"),
+            "trend": trend,
+            "seasonal": seasonal,
+            "seasonal_period": sp,
+        }
     except Exception as e:
         logger.warning(f"Final ETS fit failed, falling back to naive mean: {e}")
         forecast = np.full(horizon, float(np.mean(y)))
@@ -166,7 +210,7 @@ def _fit_auto_ets(
     ci_lo = forecast - widths
     ci_hi = forecast + widths
 
-    return (cv_results, ets_cv_source), forecast, (ci_lo, ci_hi)
+    return (cv_results, ets_cv_source), forecast, (ci_lo, ci_hi), ets_params
 
 
 def _fit_auto_sarima(
@@ -178,6 +222,12 @@ def _fit_auto_sarima(
     seasonal = seasonal_period is not None and seasonal_period > 1
     m = seasonal_period if seasonal else 1
 
+    # Skip seasonal modeling if data lacks seasonal patterns
+    if seasonal and not _has_seasonality(y, m):
+        logger.info("No seasonal pattern detected (autocorrelation test), using non-seasonal ARIMA")
+        seasonal = False
+        m = 1
+
     # Short-circuit for zero-variance (stagnant) data — no model needed
     if np.std(y) < 1e-10:
         mean_val = float(np.mean(y))
@@ -186,12 +236,13 @@ def _fit_auto_sarima(
         cv_results = [{"y": float(y[-n_cv + j]), "AutoARIMA": mean_val} for j in range(n_cv)]
         ci_lo = np.full(horizon, mean_val)
         ci_hi = np.full(horizon, mean_val)
-        return (cv_results, "in_sample"), forecast, (ci_lo, ci_hi)
+        return (cv_results, "in_sample"), forecast, (ci_lo, ci_hi), {"order": (0, 0, 0), "seasonal_order": (0, 0, 0, 1), "coefficients": {}}
 
     # Reduce search space for larger datasets
     large = len(y) > 200
     max_pq = 2 if large else 3
 
+    arima_params = {"order": (0, 0, 0), "seasonal_order": (0, 0, 0, 1), "coefficients": {}}
     try:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -219,8 +270,62 @@ def _fit_auto_sarima(
         forecast, conf_int = arima_model.predict(n_periods=horizon, return_conf_int=True, alpha=0.20)
         ci_lo = conf_int[:, 0]
         ci_hi = conf_int[:, 1]
+
+        # Extract fitted parameters for manual validation
+        try:
+            coef_names = arima_model.arima_res_.param_names
+            coef_vals = arima_model.params()
+            coefficients = {name: round(float(val), 6) for name, val in zip(coef_names, coef_vals)}
+        except Exception:
+            coefficients = {}
+        arima_params = {
+            "order": tuple(int(x) for x in order),
+            "seasonal_order": tuple(int(x) for x in seasonal_order),
+            "coefficients": coefficients,
+        }
+    except ValueError as e:
+        # ValueError from nsdiffs when seasonal test produces singular matrices
+        logger.warning(f"Seasonal ARIMA failed with ValueError: {e}")
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                arima_model = pm.auto_arima(
+                    y, seasonal=False, max_p=max_pq, max_q=max_pq,
+                    max_d=2, stepwise=True, suppress_warnings=True, error_action="ignore",
+                )
+            order = arima_model.order
+            seasonal_order = (0, 0, 0, 0)
+            cv_results, arima_cv_source = _rolling_cv_sarima(y, order, seasonal_order, horizon, n_windows)
+            forecast, conf_int = arima_model.predict(n_periods=horizon, return_conf_int=True, alpha=0.20)
+            ci_lo = conf_int[:, 0]
+            ci_hi = conf_int[:, 1]
+            try:
+                coef_names = arima_model.arima_res_.param_names
+                coef_vals = arima_model.params()
+                coefficients = {name: round(float(val), 6) for name, val in zip(coef_names, coef_vals)}
+            except Exception:
+                coefficients = {}
+            arima_params = {
+                "order": tuple(int(x) for x in order),
+                "seasonal_order": tuple(int(x) for x in seasonal_order),
+                "coefficients": coefficients,
+            }
+            logger.info(f"Non-seasonal ARIMA retry succeeded: order={order}")
+        except Exception as e2:
+            logger.warning(f"Non-seasonal ARIMA also failed: {e2}. Falling back to naive mean.")
+            mean_val = float(np.mean(y))
+            forecast = np.full(horizon, mean_val)
+            residual_std = max(float(np.std(y)), 1e-10)
+            steps = np.arange(1, horizon + 1)
+            widths = 1.28 * residual_std * np.sqrt(steps)
+            ci_lo = forecast - widths
+            ci_hi = forecast + widths
+            n_cv = min(horizon, len(y))
+            cv_results = [{"y": float(y[-n_cv + j]), "AutoARIMA": mean_val} for j in range(n_cv)]
+            arima_cv_source = "in_sample"
     except Exception as e:
-        logger.warning(f"AutoARIMA failed, falling back to naive mean: {e}")
+        # Unexpected non-ValueError failures
+        logger.warning(f"AutoARIMA failed with {type(e).__name__}: {e}. Falling back to naive mean.")
         mean_val = float(np.mean(y))
         forecast = np.full(horizon, mean_val)
         residual_std = max(float(np.std(y)), 1e-10)
@@ -232,7 +337,7 @@ def _fit_auto_sarima(
         cv_results = [{"y": float(y[-n_cv + j]), "AutoARIMA": mean_val} for j in range(n_cv)]
         arima_cv_source = "in_sample"
 
-    return (cv_results, arima_cv_source), forecast, (ci_lo, ci_hi)
+    return (cv_results, arima_cv_source), forecast, (ci_lo, ci_hi), arima_params
 
 
 def _rolling_cv_ets(
@@ -327,10 +432,14 @@ def _rolling_cv_sarima(
             warnings.simplefilter("ignore")
             try:
                 maxiter = 30 if len(y) > 200 else 50
-                model = SARIMAX(
-                    train, order=order, seasonal_order=seasonal_order,
-                    enforce_stationarity=False, enforce_invertibility=False,
-                ).fit(disp=False, maxiter=maxiter)
+                sarimax_kwargs = dict(
+                    order=order,
+                    enforce_stationarity=False,
+                    enforce_invertibility=False,
+                )
+                if seasonal_order[3] > 1:
+                    sarimax_kwargs["seasonal_order"] = seasonal_order
+                model = SARIMAX(train, **sarimax_kwargs).fit(disp=False, maxiter=maxiter)
                 pred = model.forecast(horizon)
                 # Sanitize NaN predictions
                 if np.any(np.isnan(pred)):
@@ -352,10 +461,14 @@ def _rolling_cv_sarima(
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             maxiter = 30 if len(y) > 200 else 50
-            model = SARIMAX(
-                y, order=order, seasonal_order=seasonal_order,
-                enforce_stationarity=False, enforce_invertibility=False,
-            ).fit(disp=False, maxiter=maxiter)
+            sarimax_kwargs = dict(
+                order=order,
+                enforce_stationarity=False,
+                enforce_invertibility=False,
+            )
+            if seasonal_order[3] > 1:
+                sarimax_kwargs["seasonal_order"] = seasonal_order
+            model = SARIMAX(y, **sarimax_kwargs).fit(disp=False, maxiter=maxiter)
             fitted = model.fittedvalues
             # Sanitize NaN fitted values
             fill_val = float(np.nanmean(y))

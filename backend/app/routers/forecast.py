@@ -11,12 +11,12 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.config import APP_VERSION
 from app.schemas.responses import ForecastResponse
-from app.schemas.requests import PDFExportRequest, ExcelExportRequest
+from app.schemas.requests import PDFExportRequest, ExcelExportRequest, IndependentValidationRequest, ManualValidationRequest
 from app.services.excel_export import generate_excel
 from app.services.file_parser import parse_upload, parse_from_bytes
 from app.services.validator import validate_data
 from app.services.data_prep import prepare_data
-from app.services.modeling import run_models, fit_ets, fit_arima, build_forecast_df
+from app.services.modeling import run_models, fit_ets, fit_arima, build_forecast_df, _has_seasonality
 from app.services.evaluation import evaluate_models, compute_forecast_deviation_pct
 from app.services.decision import select_best_model, update_comparison_summary
 from app.services.visualization import generate_charts
@@ -39,7 +39,7 @@ def _sanitize(value):
     return value
 
 
-def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source="cross_validation", excel_ets_forecast=None):
+def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source="cross_validation", excel_ets_forecast=None, model_params=None):
     """Build the forecast result dict (shared by both endpoints)."""
     forecasts = model_result["forecasts"]
     sel_model = decision["selected_model"]
@@ -121,6 +121,7 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
         },
         "metrics_source": metrics_source,
         "comparison_forecasts": comparison_forecasts,
+        "model_params": model_params,
     })
 
 
@@ -158,7 +159,14 @@ async def run_forecast(
                 file_hash=file_hash,
             )
 
-            decision = select_best_model(metrics, preference, file_hash=file_hash)
+            sp_val = seasonal_period if seasonal_period and seasonal_period > 1 else None
+            data_has_seasonality = _has_seasonality(prepared_df["y"].values, sp_val) if sp_val else False
+            decision = select_best_model(
+                metrics, preference, file_hash=file_hash,
+                model_params=model_result.get("model_params"),
+                seasonal_period=seasonal_period,
+                has_seasonality=data_has_seasonality,
+            )
 
             forecast_dev_pct = compute_forecast_deviation_pct(
                 model_result["forecasts"],
@@ -181,7 +189,7 @@ async def run_forecast(
             )
 
             metrics_source = model_result.get("metrics_source", "cross_validation")
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast)
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast, model_params=model_result.get("model_params"))
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
@@ -336,7 +344,14 @@ async def run_forecast_stream(
 
             yield _sse("heartbeat")
             yield _sse("progress", progress=85, message="Selecting the best model...")
-            decision = select_best_model(metrics, preference, file_hash=file_hash)
+            sp_val = seasonal_period if seasonal_period and seasonal_period > 1 else None
+            data_has_seasonality = _has_seasonality(prepared_df["y"].values, sp_val) if sp_val else False
+            decision = select_best_model(
+                metrics, preference, file_hash=file_hash,
+                model_params=model_result.get("model_params"),
+                seasonal_period=seasonal_period,
+                has_seasonality=data_has_seasonality,
+            )
 
             forecast_dev_pct = compute_forecast_deviation_pct(
                 model_result["forecasts"],
@@ -362,7 +377,7 @@ async def run_forecast_stream(
 
             yield _sse("progress", progress=98, message="Finalizing your forecast...")
             metrics_source = model_result.get("metrics_source", "cross_validation")
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast)
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast, model_params=model_result.get("model_params"))
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
@@ -455,6 +470,148 @@ async def export_excel(http_request: Request, request: ExcelExportRequest):
         component="forecast_router",
         session_id=session_id,
         report_type="excel",
+        generated_filename=filename,
+        duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+    )
+
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.post("/export/independent-validation")
+async def export_independent_validation(http_request: Request, request: IndependentValidationRequest):
+    """Run R-inspired models and generate Independent Validation Excel."""
+    import traceback
+    import numpy as np
+    from app.services.independent_validation import (
+        run_independent_models, compute_variance, compute_agreement_score,
+        compute_independent_metrics, compute_python_metrics,
+    )
+    from app.services.independent_validation_export import generate_independent_validation_excel
+    t0 = time.perf_counter()
+    session_id = getattr(http_request.state, "session_id", None)
+
+    try:
+        # Reconstruct y array from historical data
+        y = np.array([entry["value"] for entry in request.historical_data], dtype=float)
+        forecast_horizon = len(request.forecast_data)
+
+        # Strict alignment check on Python forecasts
+        py_forecasts = request.comparison_forecasts
+        py_lengths = {k: len(v) for k, v in py_forecasts.items()}
+        if len(set(py_lengths.values())) > 1 or any(l != forecast_horizon for l in py_lengths.values()):
+            raise HTTPException(
+                status_code=422,
+                detail={"message": f"Python forecast arrays have mismatched lengths: {py_lengths}. Expected {forecast_horizon}.", "error_code": "ALIGNMENT_ERROR"},
+            )
+
+        # Derive seasonal period from frequency
+        _freq_sp = {"D": 7, "W": 52, "MS": 12, "M": 12, "QS": 4, "Q": 4, "YS": None, "Y": None}
+        sp = _freq_sp.get(request.frequency)
+
+        # Run independent models (returns forecasts + status overrides)
+        ind_forecasts, status_overrides = run_independent_models(y, sp, forecast_horizon)
+
+        # Strict alignment check on independent forecasts
+        ind_lengths = {k: len(v) for k, v in ind_forecasts.items()}
+        if any(l != forecast_horizon for l in ind_lengths.values()):
+            raise HTTPException(
+                status_code=500,
+                detail={"message": f"Independent forecast arrays have mismatched lengths: {ind_lengths}. Expected {forecast_horizon}.", "error_code": "ALIGNMENT_ERROR"},
+            )
+
+        # Compute variance and metrics (pass status overrides for underfit marking)
+        variance_data = compute_variance(ind_forecasts, py_forecasts, status_overrides)
+
+        # Detect if data was downsampled by checking date gaps vs declared frequency
+        observation_count = len(y)
+        _freq_expected_days = {"D": 1, "W": 7, "MS": 30, "M": 30, "QS": 91, "Q": 91, "YS": 365, "Y": 365}
+        was_downsampled = False
+        if len(request.historical_data) >= 2:
+            from datetime import datetime as _dt
+            d0 = _dt.fromisoformat(request.historical_data[0]["date"])
+            d1 = _dt.fromisoformat(request.historical_data[1]["date"])
+            actual_gap_days = (d1 - d0).days
+            expected_days = _freq_expected_days.get(request.frequency, actual_gap_days)
+            # If actual gap is >2x expected, data was likely downsampled
+            was_downsampled = actual_gap_days > expected_days * 2
+
+        score_result = compute_agreement_score(
+            variance_data,
+            observation_count=observation_count,
+            was_downsampled=was_downsampled,
+        )
+        agreement_score = score_result["score"]
+        validation_warnings = score_result["warnings"]
+
+        ind_metrics = compute_independent_metrics(y, forecast_horizon, ind_forecasts)
+        py_metrics = compute_python_metrics(y, forecast_horizon, py_forecasts)
+
+        excel_bytes = generate_independent_validation_excel(
+            historical_data=request.historical_data,
+            forecast_data=request.forecast_data,
+            ind_forecasts=ind_forecasts,
+            py_forecasts=py_forecasts,
+            variance_data=variance_data,
+            ind_metrics=ind_metrics,
+            py_metrics=py_metrics,
+            agreement_score=agreement_score,
+            frequency=request.frequency,
+            selected_model=request.selected_model,
+            validation_warnings=validation_warnings,
+        )
+
+        filename = f"MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_IndependentValidation.xlsx"
+        audit_log(
+            event_type="report_download_independent_validation",
+            component="forecast_router",
+            session_id=session_id,
+            report_type="independent_validation",
+            generated_filename=filename,
+            notes=f"agreement_score={agreement_score}",
+            duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+        )
+
+        return Response(
+            content=excel_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Independent validation export failed: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail={"message": f"Independent validation failed: {e}", "error_code": "VALIDATION_ERROR"},
+        )
+
+
+@router.post("/export/manual-validation")
+async def export_manual_validation(http_request: Request, request: ManualValidationRequest):
+    """Generate Manual Validation Excel with parameters and empty cells for user."""
+    from app.services.manual_validation_export import generate_manual_validation_excel
+
+    t0 = time.perf_counter()
+    session_id = getattr(http_request.state, "session_id", None)
+
+    excel_bytes = generate_manual_validation_excel(
+        historical_data=request.historical_data,
+        forecast_data=request.forecast_data,
+        comparison_forecasts=request.comparison_forecasts,
+        frequency=request.frequency,
+        model_params=request.model_params,
+    )
+
+    filename = f"MarketPulse_{datetime.now().strftime('%d%m%Y')}_V{APP_VERSION}_ManualValidation.xlsx"
+    audit_log(
+        event_type="report_download_manual_validation",
+        component="forecast_router",
+        session_id=session_id,
+        report_type="manual_validation",
         generated_filename=filename,
         duration_ms=round((time.perf_counter() - t0) * 1000, 1),
     )

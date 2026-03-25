@@ -30,3 +30,20 @@ class ExcelExportRequest(BaseModel):
     frequency: str
     forecast_bias: str = "Forecast"
     comparison_forecasts: dict[str, list[float]] | None = None
+
+
+class IndependentValidationRequest(BaseModel):
+    historical_data: list[dict]
+    forecast_data: list[dict]
+    comparison_forecasts: dict[str, list[float]]
+    frequency: str
+    metrics: dict[str, dict]
+    selected_model: str = "AutoETS"
+
+
+class ManualValidationRequest(BaseModel):
+    historical_data: list[dict]
+    forecast_data: list[dict]
+    comparison_forecasts: dict[str, list[float]]
+    frequency: str
+    model_params: dict
