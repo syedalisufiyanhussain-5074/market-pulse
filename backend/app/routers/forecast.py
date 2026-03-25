@@ -375,9 +375,44 @@ async def run_forecast_stream(
                 freq=freq,
             )
 
-            yield _sse("progress", progress=98, message="Finalizing your forecast...")
+            yield _sse("progress", progress=95, message="Finalizing your forecast...")
             metrics_source = model_result.get("metrics_source", "cross_validation")
             result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast, model_params=model_result.get("model_params"))
+
+            # Pre-compute Independent Validation and cache for instant export
+            yield _sse("progress", progress=97, message="Pre-computing validation...")
+            try:
+                import numpy as np
+                from app.services.independent_validation import (
+                    run_independent_models, compute_variance, compute_agreement_score,
+                    compute_independent_metrics, compute_python_metrics,
+                )
+                iv_t0 = time.perf_counter()
+                y_arr = prepared_df["y"].values
+                # Use rounded values for consistent hashing (matches export endpoint's JSON-roundtripped data)
+                iv_data_hash = hashlib.sha256(",".join(f"{v:.2f}" for v in y_arr).encode()).hexdigest()[:12]
+                iv_cache_key = f"iv_{iv_data_hash}_{freq}_{seasonal_period}_{forecast_horizon}"
+                was_ds = len(df) > len(prepared_df) * 1.5
+                cf = result.get("comparison_forecasts")
+                if cf:
+                    iv_ind_fc, iv_overrides = run_independent_models(y_arr, seasonal_period, forecast_horizon)
+                    iv_var = compute_variance(iv_ind_fc, cf, iv_overrides)
+                    iv_ind_met = compute_independent_metrics(y_arr, forecast_horizon, iv_ind_fc)
+                    iv_py_met = compute_python_metrics(y_arr, forecast_horizon, cf)
+                    iv_score = compute_agreement_score(iv_var, observation_count=len(y_arr), was_downsampled=was_ds)
+                    file_cache.put_iv(iv_cache_key, {
+                        "ind_forecasts": iv_ind_fc,
+                        "status_overrides": iv_overrides,
+                        "var_data": iv_var,
+                        "ind_metrics": iv_ind_met,
+                        "py_metrics": iv_py_met,
+                        "agreement_score": iv_score,
+                    })
+                    iv_ms = round((time.perf_counter() - iv_t0) * 1000, 1)
+                    logger.info(f"IV cache populated in {iv_ms}ms (key={iv_cache_key})", extra={"file_hash": file_hash})
+            except Exception as iv_err:
+                logger.warning(f"IV pre-computation failed (will compute on export): {iv_err}", extra={"file_hash": file_hash})
+
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
@@ -512,43 +547,67 @@ async def export_independent_validation(http_request: Request, request: Independ
         _freq_sp = {"D": 7, "W": 52, "MS": 12, "M": 12, "QS": 4, "Q": 4, "YS": None, "Y": None}
         sp = _freq_sp.get(request.frequency)
 
-        # Run independent models (returns forecasts + status overrides)
-        ind_forecasts, status_overrides = run_independent_models(y, sp, forecast_horizon)
+        # Try IV cache first (populated during forecast run)
+        iv_data_hash = hashlib.sha256(",".join(f"{v:.2f}" for v in y).encode()).hexdigest()[:12]
+        iv_cache_key = f"iv_{iv_data_hash}_{request.frequency}_{sp}_{forecast_horizon}"
+        cached = file_cache.get_iv(iv_cache_key)
 
-        # Strict alignment check on independent forecasts
-        ind_lengths = {k: len(v) for k, v in ind_forecasts.items()}
-        if any(l != forecast_horizon for l in ind_lengths.values()):
-            raise HTTPException(
-                status_code=500,
-                detail={"message": f"Independent forecast arrays have mismatched lengths: {ind_lengths}. Expected {forecast_horizon}.", "error_code": "ALIGNMENT_ERROR"},
+        if cached:
+            logger.info(f"IV cache HIT for {iv_cache_key}", extra={"file_hash": iv_data_hash})
+            ind_forecasts = cached["ind_forecasts"]
+            status_overrides = cached["status_overrides"]
+            variance_data = cached["var_data"]
+            ind_metrics = cached["ind_metrics"]
+            py_metrics = cached["py_metrics"]
+            score_result = cached["agreement_score"]
+            agreement_score = score_result["score"]
+            validation_warnings = score_result["warnings"]
+        else:
+            logger.info(f"IV cache MISS for {iv_cache_key} — computing from scratch", extra={"file_hash": iv_data_hash})
+
+            # Run independent models (returns forecasts + status overrides)
+            ind_forecasts, status_overrides = run_independent_models(y, sp, forecast_horizon)
+
+            # Strict alignment check on independent forecasts
+            ind_lengths = {k: len(v) for k, v in ind_forecasts.items()}
+            if any(l != forecast_horizon for l in ind_lengths.values()):
+                raise HTTPException(
+                    status_code=500,
+                    detail={"message": f"Independent forecast arrays have mismatched lengths: {ind_lengths}. Expected {forecast_horizon}.", "error_code": "ALIGNMENT_ERROR"},
+                )
+
+            # Compute variance and metrics (pass status overrides for underfit marking)
+            variance_data = compute_variance(ind_forecasts, py_forecasts, status_overrides)
+
+            # Detect if data was downsampled by checking date gaps vs declared frequency
+            observation_count = len(y)
+            _freq_expected_days = {"D": 1, "W": 7, "MS": 30, "M": 30, "QS": 91, "Q": 91, "YS": 365, "Y": 365}
+            was_downsampled = False
+            if len(request.historical_data) >= 2:
+                from datetime import datetime as _dt
+                d0 = _dt.fromisoformat(request.historical_data[0]["date"])
+                d1 = _dt.fromisoformat(request.historical_data[1]["date"])
+                actual_gap_days = (d1 - d0).days
+                expected_days = _freq_expected_days.get(request.frequency, actual_gap_days)
+                was_downsampled = actual_gap_days > expected_days * 2
+
+            score_result = compute_agreement_score(
+                variance_data,
+                observation_count=observation_count,
+                was_downsampled=was_downsampled,
             )
+            agreement_score = score_result["score"]
+            validation_warnings = score_result["warnings"]
 
-        # Compute variance and metrics (pass status overrides for underfit marking)
-        variance_data = compute_variance(ind_forecasts, py_forecasts, status_overrides)
+            ind_metrics = compute_independent_metrics(y, forecast_horizon, ind_forecasts)
+            py_metrics = compute_python_metrics(y, forecast_horizon, py_forecasts)
 
-        # Detect if data was downsampled by checking date gaps vs declared frequency
-        observation_count = len(y)
-        _freq_expected_days = {"D": 1, "W": 7, "MS": 30, "M": 30, "QS": 91, "Q": 91, "YS": 365, "Y": 365}
-        was_downsampled = False
-        if len(request.historical_data) >= 2:
-            from datetime import datetime as _dt
-            d0 = _dt.fromisoformat(request.historical_data[0]["date"])
-            d1 = _dt.fromisoformat(request.historical_data[1]["date"])
-            actual_gap_days = (d1 - d0).days
-            expected_days = _freq_expected_days.get(request.frequency, actual_gap_days)
-            # If actual gap is >2x expected, data was likely downsampled
-            was_downsampled = actual_gap_days > expected_days * 2
-
-        score_result = compute_agreement_score(
-            variance_data,
-            observation_count=observation_count,
-            was_downsampled=was_downsampled,
-        )
-        agreement_score = score_result["score"]
-        validation_warnings = score_result["warnings"]
-
-        ind_metrics = compute_independent_metrics(y, forecast_horizon, ind_forecasts)
-        py_metrics = compute_python_metrics(y, forecast_horizon, py_forecasts)
+            # Populate cache for next download
+            file_cache.put_iv(iv_cache_key, {
+                "ind_forecasts": ind_forecasts, "status_overrides": status_overrides,
+                "var_data": variance_data, "ind_metrics": ind_metrics,
+                "py_metrics": py_metrics, "agreement_score": score_result,
+            })
 
         excel_bytes = generate_independent_validation_excel(
             historical_data=request.historical_data,
