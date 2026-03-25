@@ -59,6 +59,7 @@ export interface ForecastResponse {
   metrics_source: string;
   comparison_forecasts?: Record<string, number[]>;
   model_params?: Record<string, unknown>;
+  file_hash?: string;
 }
 
 function extractError(detail: unknown, fallback: string): AppError {
@@ -319,6 +320,7 @@ export async function exportIndependentValidation(data: ForecastResponse): Promi
       frequency: data.frequency,
       metrics: data.metrics,
       selected_model: data.selected_model,
+      file_hash: data.file_hash ?? "",
     }),
   });
 

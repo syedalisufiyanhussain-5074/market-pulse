@@ -39,6 +39,7 @@ class IndependentValidationRequest(BaseModel):
     frequency: str
     metrics: dict[str, dict]
     selected_model: str = "AutoETS"
+    file_hash: str = ""
 
 
 class ManualValidationRequest(BaseModel):

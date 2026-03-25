@@ -27,6 +27,39 @@ from app.utils import file_cache
 logger = get_logger("forecast_router")
 router = APIRouter(prefix="/api", tags=["forecast"])
 
+# --- Background IV pre-computation ---
+MAX_BG_THREADS = 1
+_iv_bg_running: set[str] = set()
+_iv_bg_lock = threading.Lock()
+
+
+def _precompute_iv_background(iv_cache_key, y, sp, horizon, freq, cf, was_ds, file_hash):
+    """Background IV pre-computation — populates cache for instant export."""
+    try:
+        logger.info(f"IV background job STARTED (key={iv_cache_key})", extra={"file_hash": file_hash})
+        t0 = time.perf_counter()
+        from app.services.independent_validation import (
+            run_independent_models, compute_variance, compute_agreement_score,
+            compute_independent_metrics, compute_python_metrics,
+        )
+        ind_fc, overrides = run_independent_models(y, sp, horizon)
+        var_data = compute_variance(ind_fc, cf, overrides)
+        ind_met = compute_independent_metrics(y, horizon, ind_fc)
+        py_met = compute_python_metrics(y, horizon, cf)
+        score = compute_agreement_score(var_data, observation_count=len(y), was_downsampled=was_ds)
+        file_cache.put_iv(iv_cache_key, {
+            "ind_forecasts": ind_fc, "status_overrides": overrides,
+            "var_data": var_data, "ind_metrics": ind_met,
+            "py_metrics": py_met, "agreement_score": score,
+        })
+        iv_ms = round((time.perf_counter() - t0) * 1000, 1)
+        logger.info(f"IV background job COMPLETED in {iv_ms}ms (key={iv_cache_key})", extra={"file_hash": file_hash})
+    except Exception as e:
+        logger.warning(f"IV background job FAILED: {e}", extra={"file_hash": file_hash})
+    finally:
+        with _iv_bg_lock:
+            _iv_bg_running.discard(iv_cache_key)
+
 
 def _sanitize(value):
     """Replace NaN/Inf with None for JSON-safe serialization."""
@@ -39,7 +72,7 @@ def _sanitize(value):
     return value
 
 
-def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source="cross_validation", excel_ets_forecast=None, model_params=None):
+def _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source="cross_validation", excel_ets_forecast=None, model_params=None, file_hash=""):
     """Build the forecast result dict (shared by both endpoints)."""
     forecasts = model_result["forecasts"]
     sel_model = decision["selected_model"]
@@ -122,6 +155,7 @@ def _build_result(prepared_df, model_result, metrics, decision, charts, forecast
         "metrics_source": metrics_source,
         "comparison_forecasts": comparison_forecasts,
         "model_params": model_params,
+        "file_hash": file_hash,
     })
 
 
@@ -189,7 +223,7 @@ async def run_forecast(
             )
 
             metrics_source = model_result.get("metrics_source", "cross_validation")
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast, model_params=model_result.get("model_params"))
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast, model_params=model_result.get("model_params"), file_hash=file_hash)
             audit_log(
                 event_type="forecast_run",
                 component="forecast_router",
@@ -377,7 +411,7 @@ async def run_forecast_stream(
 
             yield _sse("progress", progress=98, message="Finalizing your forecast...")
             metrics_source = model_result.get("metrics_source", "cross_validation")
-            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast, model_params=model_result.get("model_params"))
+            result = _build_result(prepared_df, model_result, metrics, decision, charts, forecast_horizon, freq, preference, metrics_source=metrics_source, excel_ets_forecast=excel_ets_forecast, model_params=model_result.get("model_params"), file_hash=file_hash)
 
             audit_log(
                 event_type="forecast_run",
@@ -387,6 +421,22 @@ async def run_forecast_stream(
                 duration_ms=round((time.perf_counter() - t0) * 1000, 1),
             )
             yield _sse("complete", **result)
+
+            # Fire-and-forget: pre-compute IV in background thread
+            cf = result.get("comparison_forecasts")
+            if cf:
+                iv_cache_key = f"iv_{file_hash}_{freq}_{seasonal_period}_{forecast_horizon}"
+                with _iv_bg_lock:
+                    if iv_cache_key not in _iv_bg_running and len(_iv_bg_running) < MAX_BG_THREADS:
+                        if file_cache.get_iv(iv_cache_key) is None:
+                            _iv_bg_running.add(iv_cache_key)
+                            threading.Thread(
+                                target=_precompute_iv_background,
+                                args=(iv_cache_key, prepared_df["y"].values.copy(),
+                                      seasonal_period, forecast_horizon, freq, cf,
+                                      len(df) > len(prepared_df) * 1.5, file_hash),
+                                daemon=True,
+                            ).start()
 
         except HTTPException as e:
             detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
@@ -513,13 +563,12 @@ async def export_independent_validation(http_request: Request, request: Independ
         _freq_sp = {"D": 7, "W": 52, "MS": 12, "M": 12, "QS": 4, "Q": 4, "YS": None, "Y": None}
         sp = _freq_sp.get(request.frequency)
 
-        # Try IV cache first (populated during forecast run)
-        iv_data_hash = hashlib.sha256(",".join(f"{v:.2f}" for v in y).encode()).hexdigest()[:12]
-        iv_cache_key = f"iv_{iv_data_hash}_{request.frequency}_{sp}_{forecast_horizon}"
+        # Try IV cache first (populated by background thread after forecast)
+        iv_cache_key = f"iv_{request.file_hash}_{request.frequency}_{sp}_{forecast_horizon}"
         cached = file_cache.get_iv(iv_cache_key)
 
         if cached:
-            logger.info(f"IV cache HIT for {iv_cache_key}", extra={"file_hash": iv_data_hash})
+            logger.info(f"IV cache HIT (key={iv_cache_key})", extra={"file_hash": request.file_hash})
             ind_forecasts = cached["ind_forecasts"]
             status_overrides = cached["status_overrides"]
             variance_data = cached["var_data"]
@@ -529,7 +578,7 @@ async def export_independent_validation(http_request: Request, request: Independ
             agreement_score = score_result["score"]
             validation_warnings = score_result["warnings"]
         else:
-            logger.info(f"IV cache MISS for {iv_cache_key} — computing from scratch", extra={"file_hash": iv_data_hash})
+            logger.info(f"IV cache MISS (key={iv_cache_key}) — computing from scratch", extra={"file_hash": request.file_hash})
 
             # Run independent models (returns forecasts + status overrides)
             ind_forecasts, status_overrides = run_independent_models(y, sp, forecast_horizon)
