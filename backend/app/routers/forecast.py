@@ -11,7 +11,7 @@ from fastapi.responses import Response, StreamingResponse
 
 from app.config import APP_VERSION
 from app.schemas.responses import ForecastResponse
-from app.schemas.requests import PDFExportRequest, ExcelExportRequest, IndependentValidationRequest, ManualValidationRequest
+from app.schemas.requests import PDFExportRequest, ExcelExportRequest, IndependentValidationRequest, ManualValidationRequest, ValidationExportRequest
 from app.services.excel_export import generate_excel
 from app.services.file_parser import parse_upload, parse_from_bytes
 from app.services.validator import validate_data
@@ -27,38 +27,8 @@ from app.utils import file_cache
 logger = get_logger("forecast_router")
 router = APIRouter(prefix="/api", tags=["forecast"])
 
-# --- Background IV pre-computation ---
-MAX_BG_THREADS = 1
-_iv_bg_running: set[str] = set()
-_iv_bg_lock = threading.Lock()
-
-
-def _precompute_iv_background(iv_cache_key, y, sp, horizon, freq, cf, was_ds, file_hash):
-    """Background IV pre-computation — populates cache for instant export."""
-    try:
-        logger.info(f"IV background job STARTED (key={iv_cache_key})", extra={"file_hash": file_hash})
-        t0 = time.perf_counter()
-        from app.services.independent_validation import (
-            run_independent_models, compute_variance, compute_agreement_score,
-            compute_independent_metrics, compute_python_metrics,
-        )
-        ind_fc, overrides = run_independent_models(y, sp, horizon)
-        var_data = compute_variance(ind_fc, cf, overrides)
-        ind_met = compute_independent_metrics(y, horizon, ind_fc)
-        py_met = compute_python_metrics(y, horizon, cf)
-        score = compute_agreement_score(var_data, observation_count=len(y), was_downsampled=was_ds)
-        file_cache.put_iv(iv_cache_key, {
-            "ind_forecasts": ind_fc, "status_overrides": overrides,
-            "var_data": var_data, "ind_metrics": ind_met,
-            "py_metrics": py_met, "agreement_score": score,
-        })
-        iv_ms = round((time.perf_counter() - t0) * 1000, 1)
-        logger.info(f"IV background job COMPLETED in {iv_ms}ms (key={iv_cache_key})", extra={"file_hash": file_hash})
-    except Exception as e:
-        logger.warning(f"IV background job FAILED: {e}", extra={"file_hash": file_hash})
-    finally:
-        with _iv_bg_lock:
-            _iv_bg_running.discard(iv_cache_key)
+# Centralized frequency → seasonal period mapping
+FREQ_SP_MAP = {"D": 7, "W": 52, "MS": 12, "M": 12, "QS": 4, "Q": 4, "YS": None, "Y": None}
 
 
 def _sanitize(value):
@@ -422,22 +392,6 @@ async def run_forecast_stream(
             )
             yield _sse("complete", **result)
 
-            # Fire-and-forget: pre-compute IV in background thread
-            cf = result.get("comparison_forecasts")
-            if cf:
-                iv_cache_key = f"iv_{file_hash}_{freq}_{seasonal_period}_{forecast_horizon}"
-                with _iv_bg_lock:
-                    if iv_cache_key not in _iv_bg_running and len(_iv_bg_running) < MAX_BG_THREADS:
-                        if file_cache.get_iv(iv_cache_key) is None:
-                            _iv_bg_running.add(iv_cache_key)
-                            threading.Thread(
-                                target=_precompute_iv_background,
-                                args=(iv_cache_key, prepared_df["y"].values.copy(),
-                                      seasonal_period, forecast_horizon, freq, cf,
-                                      len(df) > len(prepared_df) * 1.5, file_hash),
-                                daemon=True,
-                            ).start()
-
         except HTTPException as e:
             detail = e.detail if isinstance(e.detail, dict) else {"message": str(e.detail)}
             audit_log(
@@ -695,3 +649,126 @@ async def export_manual_validation(http_request: Request, request: ManualValidat
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"},
     )
+
+
+@router.post("/export/validation")
+async def export_validation(http_request: Request, request: ValidationExportRequest):
+    """Generate IV + MV validation reports as a single ZIP."""
+    import zipfile
+    import numpy as np
+    from app.services.independent_validation import (
+        run_independent_models, compute_variance, compute_agreement_score,
+        compute_independent_metrics, compute_python_metrics,
+    )
+    from app.services.independent_validation_export import generate_independent_validation_excel
+    from app.services.manual_validation_export import generate_manual_validation_excel
+
+    t0 = time.perf_counter()
+    session_id = getattr(http_request.state, "session_id", None)
+
+    try:
+        y = np.array([e["value"] for e in request.historical_data], dtype=float)
+        forecast_horizon = len(request.forecast_data)
+        sp = FREQ_SP_MAP.get(request.frequency)
+        py_forecasts = request.comparison_forecasts
+
+        # --- Independent Validation (wrapped — ZIP still returns MV if IV fails) ---
+        iv_bytes = None
+        iv_error = None
+        agreement_notes = ""
+        try:
+            t_iv = time.perf_counter()
+
+            use_cache = bool(request.file_hash)
+            iv_cache_key = f"iv_{request.file_hash}_{request.frequency}_{sp}_{forecast_horizon}" if use_cache else ""
+            if not use_cache:
+                logger.warning("file_hash missing — IV cache disabled for this request")
+
+            cached = file_cache.get_iv(iv_cache_key) if use_cache else None
+            if cached:
+                logger.info(f"IV cache HIT (key={iv_cache_key})")
+                ind_forecasts = cached["ind_forecasts"]
+                status_overrides = cached["status_overrides"]
+                variance_data = cached["var_data"]
+                ind_metrics = cached["ind_metrics"]
+                py_metrics = cached["py_metrics"]
+                score_result = cached["agreement_score"]
+            else:
+                if use_cache:
+                    logger.info(f"IV cache MISS (key={iv_cache_key}) — computing")
+                ind_forecasts, status_overrides = run_independent_models(y, sp, forecast_horizon)
+                variance_data = compute_variance(ind_forecasts, py_forecasts, status_overrides)
+                observation_count = len(y)
+                was_downsampled = False
+                if len(request.historical_data) >= 2:
+                    from datetime import datetime as _dt
+                    d0 = _dt.fromisoformat(request.historical_data[0]["date"])
+                    d1 = _dt.fromisoformat(request.historical_data[1]["date"])
+                    _freq_days = {"D": 1, "W": 7, "MS": 30, "QS": 91, "YS": 365}
+                    was_downsampled = (d1 - d0).days > _freq_days.get(request.frequency, 999) * 2
+                score_result = compute_agreement_score(variance_data, observation_count=observation_count, was_downsampled=was_downsampled)
+                ind_metrics = compute_independent_metrics(y, forecast_horizon, ind_forecasts)
+                py_metrics = compute_python_metrics(y, forecast_horizon, py_forecasts)
+                if use_cache:
+                    file_cache.put_iv(iv_cache_key, {
+                        "ind_forecasts": ind_forecasts, "status_overrides": status_overrides,
+                        "var_data": variance_data, "ind_metrics": ind_metrics,
+                        "py_metrics": py_metrics, "agreement_score": score_result,
+                    })
+
+            iv_bytes = generate_independent_validation_excel(
+                request.historical_data, request.forecast_data,
+                ind_forecasts, py_forecasts, variance_data,
+                ind_metrics, py_metrics, score_result["score"],
+                request.frequency, request.selected_model, score_result["warnings"],
+            )
+            agreement_notes = f"agreement_score={score_result['score']}"
+            logger.info(f"IV generated in {(time.perf_counter() - t_iv) * 1000:.0f}ms")
+        except Exception as e:
+            iv_error = str(e)
+            logger.error(f"IV generation failed: {e}")
+
+        # --- Manual Validation ---
+        t_mv = time.perf_counter()
+        mv_bytes = generate_manual_validation_excel(
+            request.historical_data, request.forecast_data,
+            request.comparison_forecasts, request.frequency, request.model_params,
+        )
+        logger.info(f"MV generated in {(time.perf_counter() - t_mv) * 1000:.0f}ms")
+
+        # --- ZIP (always includes MV; includes IV if successful) ---
+        t_zip = time.perf_counter()
+        date_str = datetime.now().strftime("%d%m%Y")
+        base = f"MarketPulse_{date_str}_V{APP_VERSION}"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            if iv_bytes:
+                zf.writestr("Independent_Validation_Report.xlsx", iv_bytes)
+            else:
+                zf.writestr(
+                    "Independent_Validation_ERROR.txt",
+                    f"Independent Validation report could not be generated.\nError: {iv_error}\n\nPlease try again or contact support.",
+                )
+            zf.writestr("Manual_Validation_Report.xlsx", mv_bytes)
+        zip_bytes = buf.getvalue()
+        logger.info(f"ZIP created in {(time.perf_counter() - t_zip) * 1000:.0f}ms ({len(zip_bytes)} bytes)")
+
+        audit_log(
+            event_type="report_download_validation",
+            component="forecast_router",
+            session_id=session_id,
+            report_type="validation_zip",
+            notes=agreement_notes or f"iv_failed={iv_error}",
+            duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+        )
+
+        return Response(
+            content=zip_bytes,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={base}_ValidationReports.zip"},
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Validation export failed: {e}")
+        raise HTTPException(status_code=500, detail={"message": "Failed to generate validation reports.", "error_code": "EXPORT_ERROR"})

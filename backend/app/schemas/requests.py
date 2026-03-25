@@ -48,3 +48,15 @@ class ManualValidationRequest(BaseModel):
     comparison_forecasts: dict[str, list[float]]
     frequency: str
     model_params: dict
+
+
+class ValidationExportRequest(BaseModel):
+    historical_data: list[dict]
+    forecast_data: list[dict]
+    comparison_forecasts: dict[str, list[float]]
+    frequency: str
+    metrics: dict[str, dict]
+    selected_model: str = "AutoETS"
+    model_params: dict
+    file_hash: str = ""
+    forecast_bias: str = "Forecast"

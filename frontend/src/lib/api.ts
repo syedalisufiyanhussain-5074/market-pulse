@@ -350,3 +350,27 @@ export async function exportManualValidation(data: ForecastResponse): Promise<Bl
 
   return res.blob();
 }
+
+export async function exportValidation(data: ForecastResponse): Promise<Blob> {
+  const res = await fetch(`${API_BASE}/api/export/validation`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Session-ID": getSessionId() },
+    body: JSON.stringify({
+      historical_data: data.historical_data,
+      forecast_data: data.forecast_data,
+      comparison_forecasts: data.comparison_forecasts ?? {},
+      frequency: data.frequency,
+      metrics: data.metrics,
+      selected_model: data.selected_model,
+      model_params: data.model_params ?? {},
+      file_hash: data.file_hash ?? "",
+      forecast_bias: data.forecast_bias ?? "Forecast",
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Unable to generate Validation Reports. Please try again.");
+  }
+
+  return res.blob();
+}
