@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback } from "react";
-import { useDropzone } from "react-dropzone";
+import { useDropzone, type FileRejection } from "react-dropzone";
 import { Upload, FileSpreadsheet } from "lucide-react";
 
 interface FileUploaderProps {
   onFileSelect: (file: File) => void;
+  onError?: (message: string) => void;
   isLoading: boolean;
 }
 
@@ -14,7 +15,7 @@ const ACCEPTED_TYPES = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
 };
 
-export default function FileUploader({ onFileSelect, isLoading }: FileUploaderProps) {
+export default function FileUploader({ onFileSelect, onError, isLoading }: FileUploaderProps) {
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length > 0) {
@@ -24,8 +25,23 @@ export default function FileUploader({ onFileSelect, isLoading }: FileUploaderPr
     [onFileSelect]
   );
 
+  const onDropRejected = useCallback(
+    (rejections: FileRejection[]) => {
+      const code = rejections[0]?.errors[0]?.code;
+      if (code === "file-too-large") {
+        onError?.("This file is too large (over 10 MB). Try reducing the file size or trimming unused columns before uploading.");
+      } else if (code === "file-invalid-type") {
+        onError?.("Unsupported file type. Please upload a .csv or .xlsx file.");
+      } else {
+        onError?.("File could not be uploaded. Please try again.");
+      }
+    },
+    [onError]
+  );
+
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected,
     accept: ACCEPTED_TYPES,
     maxFiles: 1,
     maxSize: 10 * 1024 * 1024, // 10MB

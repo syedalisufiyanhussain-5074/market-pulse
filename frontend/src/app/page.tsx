@@ -10,39 +10,11 @@ import LoadingState from "@/components/LoadingState";
 import ForecastResults from "@/components/ForecastResults";
 import DownloadButton from "@/components/DownloadButton";
 import { uploadFile, runForecastStream, fetchAppVersion, AppError, type UploadResponse, type ForecastResponse } from "@/lib/api";
+import { useSmoothedProgress } from "@/hooks/useSmoothedProgress";
 
 type Step = "upload" | "configure" | "loading" | "results";
 
 const DATA_QUALITY_CODES = ["INSUFFICIENT_PERIODS", "EXCESSIVE_MISSING", "NO_VALID_VALUES"];
-
-function useSmoothedProgress(target: number): number {
-  const [display, setDisplay] = useState(0);
-  const ref = useRef(0);
-
-  useEffect(() => {
-    if (target < ref.current) {
-      ref.current = target;
-      setDisplay(target);
-      return;
-    }
-    let raf: number;
-    const animate = () => {
-      const diff = target - ref.current;
-      if (Math.abs(diff) < 0.5) {
-        ref.current = target;
-        setDisplay(target);
-        return;
-      }
-      ref.current = Math.min(target, ref.current + diff * 0.08);
-      setDisplay(Math.round(ref.current));
-      raf = requestAnimationFrame(animate);
-    };
-    raf = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(raf);
-  }, [target]);
-
-  return display;
-}
 
 export default function Home() {
   const [step, setStep] = useState<Step>("upload");
@@ -209,7 +181,7 @@ export default function Home() {
                 Get AI-powered demand and price forecasts.
               </p>
             </div>
-            <FileUploader onFileSelect={handleFileSelect} isLoading={isUploading} />
+            <FileUploader onFileSelect={handleFileSelect} onError={setError} isLoading={isUploading} />
             {isUploading && uploadStatus && (
               <p className="text-center text-white/40 text-sm animate-pulse">{uploadStatus}</p>
             )}

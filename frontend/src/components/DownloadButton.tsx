@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { Download, FileSpreadsheet, FlaskConical, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { exportPDF, exportExcel, exportValidation, type ForecastResponse } from "@/lib/api";
+import { exportPDF, exportExcel, runValidationStream, type ForecastResponse } from "@/lib/api";
+import { useSmoothedProgress } from "@/hooks/useSmoothedProgress";
 
 interface DownloadButtonProps {
   data: ForecastResponse;
@@ -23,6 +24,9 @@ export default function DownloadButton({ data, timingMs, appVersion = "1.6", rep
   const [isExportingPDF, setIsExportingPDF] = useState(false);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [isExportingValidation, setIsExportingValidation] = useState(false);
+  const [validationProgress, setValidationProgress] = useState<{ pct: number; message: string } | null>(null);
+
+  const smoothedPct = useSmoothedProgress(validationProgress?.pct ?? 0);
 
   const handleDownload = async (
     exportFn: () => Promise<Blob>,
@@ -45,6 +49,29 @@ export default function DownloadButton({ data, timingMs, appVersion = "1.6", rep
       console.error(`${label} export failed:`, error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleValidationDownload = async () => {
+    setIsExportingValidation(true);
+    setValidationProgress({ pct: 2, message: "Starting..." });
+    try {
+      const blob = await runValidationStream(data, (progress, message) => {
+        setValidationProgress({ pct: progress, message });
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = generateFilename("zip", appVersion, rn, "ValidationReports");
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Validation export failed:", error);
+    } finally {
+      setIsExportingValidation(false);
+      setValidationProgress(null);
     }
   };
 
@@ -75,7 +102,7 @@ export default function DownloadButton({ data, timingMs, appVersion = "1.6", rep
         ))}
       </div>
       <Button
-        onClick={() => handleDownload(() => exportValidation(data), generateFilename("zip", appVersion, rn, "ValidationReports"), setIsExportingValidation, "Validation Reports")}
+        onClick={handleValidationDownload}
         disabled={isExportingValidation}
         className="bg-white text-black hover:bg-white/90 font-semibold border-0 px-3 py-1.5 text-[13px] w-full justify-center whitespace-nowrap"
       >
@@ -86,10 +113,22 @@ export default function DownloadButton({ data, timingMs, appVersion = "1.6", rep
         )}
         {isExportingValidation ? "Generating Reports..." : "Generate Validation Reports"}
       </Button>
-      {isExportingValidation && (
-        <p className="text-xs text-white/40 text-center">
-          Running independent validation models. This may take a few minutes — please don&apos;t close the tab.
-        </p>
+      {validationProgress && (
+        <div className="w-full">
+          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-emerald-500 rounded-full transition-all duration-300 ease-out"
+              style={{ width: `${smoothedPct}%` }}
+            />
+          </div>
+          <div className="flex justify-between mt-1">
+            <p className="text-xs text-white/50">{validationProgress.message}</p>
+            <p className="text-xs text-white/50">{smoothedPct}%</p>
+          </div>
+          <p className="text-xs text-white/30 text-center mt-1">
+            Please don&apos;t close the tab.
+          </p>
+        </div>
       )}
     </div>
   );

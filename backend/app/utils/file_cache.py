@@ -52,3 +52,32 @@ def _cleanup_iv() -> None:
     expired = [k for k, (ts, _) in _iv_cache.items() if now - ts > TTL]
     for k in expired:
         del _iv_cache[k]
+
+
+# --- Temporary ZIP download cache ---
+
+MAX_ZIP_ENTRIES = 5
+_zip_cache: dict[str, tuple[float, bytes]] = {}
+_zip_lock = threading.Lock()
+
+
+def put_zip(key: str, data: bytes) -> None:
+    with _zip_lock:
+        _cleanup_zip()
+        if len(_zip_cache) >= MAX_ZIP_ENTRIES:
+            oldest = min(_zip_cache, key=lambda k: _zip_cache[k][0])
+            del _zip_cache[oldest]
+        _zip_cache[key] = (time.time(), data)
+
+
+def get_zip(key: str) -> bytes | None:
+    with _zip_lock:
+        _cleanup_zip()
+        entry = _zip_cache.pop(key, None)
+        return entry[1] if entry else None
+
+
+def _cleanup_zip() -> None:
+    now = time.time()
+    for k in [k for k, (ts, _) in _zip_cache.items() if now - ts > TTL]:
+        del _zip_cache[k]

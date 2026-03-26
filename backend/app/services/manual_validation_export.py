@@ -226,40 +226,181 @@ def generate_manual_validation_excel(
         cell.alignment = _left_header if col_idx in (1, 4) else _header_align
         cell.border = _thin_border
 
-    # Add comments to B4 and C4 headers
-    # Extract intercept value for ARIMA comment
-    intercept_val = arima_params.get("coefficients", {}).get("intercept", 0)
-    intercept_display = int(intercept_val) if intercept_val == int(intercept_val) else round(intercept_val, 2)
+    # --- Dynamic formula computation ---
+    # Extract last historical values for worked examples
+    hist_values = [h["value"] for h in historical_data]
+    last_val = hist_values[-1] if hist_values else 0
+    prev_val = hist_values[-2] if len(hist_values) >= 2 else last_val
 
-    ws3.cell(row=4, column=2).comment = Comment(
-        "ETS Forecast = Last month + [#months ahead \u00d7 (Diff b/w last & previous months)]",
-        "Market Pulse",
-    )
-    arima_comment = (
-        f"ARIMA Forecast (d=1) = previous month value + intercept of {intercept_display}\n\n"
-        f"ARIMA Forecast (d=2) = (d x previous month value) - value in month before + intercept of {intercept_display}"
-    )
-    c3_comment = Comment(arima_comment, "Market Pulse")
-    c3_comment.width = 400
-    c3_comment.height = 100
-    ws3.cell(row=4, column=3).comment = c3_comment
-
-    # Build ETS instruction
-    alpha = ets_params.get("alpha", "α")
+    # ETS parameters
+    alpha = ets_params.get("alpha", 1)
     trend_type = ets_params.get("trend", None)
-    if trend_type == "add":
-        ets_instruction = f"Apply ETS formula: level = {alpha} × y_t + (1−{alpha}) × (level_prev + trend_prev)"
-    elif trend_type == "mul":
-        ets_instruction = f"Apply ETS formula: level = {alpha} × y_t + (1−{alpha}) × (level_prev × trend_prev)"
-    else:
-        ets_instruction = f"Apply ETS formula: level = {alpha} × y_t + (1−{alpha}) × level_prev"
+    seasonal_type = ets_params.get("seasonal", None)
 
-    # Build ARIMA instruction
-    arima_instruction = f"Apply ARIMA({order[0]},{order[1]},{order[2]}) with coefficients from 'Model Parameters' sheet"
+    # ARIMA parameters
+    d = order[1]
+    p, q = order[0], order[2]
+    coefficients = arima_params.get("coefficients", {})
+    intercept = coefficients.get("intercept", 0)
+    ar1 = coefficients.get("ar.L1", 0)
+    ma1 = coefficients.get("ma.L1", 0)
+    intercept_display = round(intercept, 2) if abs(intercept) >= 0.1 else round(intercept, 4)
 
-    # Get our ETS and ARIMA predictions for the worked example
+    # Get our predictions for worked examples
     ets_preds = comparison_forecasts.get("AutoETS", [])
     arima_preds = comparison_forecasts.get("AutoARIMA", [])
+
+    # Dynamic worked example count: d=2 gets 5, all others get 3
+    N_WORKED = 5 if d == 2 else 3
+
+    # --- Compute ETS worked examples ---
+    def _compute_ets_examples(n=3):
+        if trend_type is None and seasonal_type is None:
+            return [round(last_val, 2)] * n
+        elif trend_type == "add" and seasonal_type is None:
+            trend_val = round(last_val - prev_val, 2)
+            return [round(last_val + (h + 1) * trend_val, 2) for h in range(n)]
+        else:
+            # For seasonal or complex models, use model's own predictions
+            return [round(ets_preds[h], 2) if h < len(ets_preds) else None for h in range(n)]
+
+    ets_examples = _compute_ets_examples(N_WORKED)
+
+    # --- Compute ARIMA worked examples (first 3 rows) ---
+    def _compute_arima_examples(n=3):
+        vals = []
+        if d == 0 and p >= 1:
+            # AR model: Next = intercept + ar1 × previous
+            prev = last_val
+            for i in range(n):
+                if i == 0 and arima_preds:
+                    vals.append(round(arima_preds[0], 2))
+                    prev = arima_preds[0]
+                else:
+                    nxt = intercept + ar1 * prev
+                    vals.append(round(nxt, 2))
+                    prev = nxt
+        elif d == 1:
+            # d=1: Next = prev + intercept (simplified, AR/MA terms decay)
+            prev = last_val
+            for i in range(n):
+                if i == 0 and arima_preds:
+                    vals.append(round(arima_preds[0], 2))
+                    prev = arima_preds[0]
+                else:
+                    nxt = prev + intercept
+                    vals.append(round(nxt, 2))
+                    prev = nxt
+        elif d == 2:
+            # d=2: Next = 2×prev - prev2 + intercept
+            prev2, prev1 = prev_val, last_val
+            for i in range(n):
+                if i == 0 and arima_preds:
+                    vals.append(round(arima_preds[0], 2))
+                    prev2, prev1 = prev1, arima_preds[0]
+                else:
+                    nxt = 2 * prev1 - prev2 + intercept
+                    vals.append(round(nxt, 2))
+                    prev2, prev1 = prev1, nxt
+        else:
+            # d=0 without AR — use model predictions
+            for i in range(n):
+                if i < len(arima_preds):
+                    vals.append(round(arima_preds[i], 2))
+                else:
+                    vals.append(None)
+        return vals
+
+    arima_examples = _compute_arima_examples(N_WORKED)
+
+    # --- Dynamic ETS header comment ---
+    if trend_type is None and seasonal_type is None:
+        ets_comment_text = f"ETS Forecast = {round(last_val, 2)} (last observed value, repeated for all periods)"
+    elif trend_type == "add" and seasonal_type is None:
+        trend_val = round(last_val - prev_val, 2)
+        ets_comment_text = f"ETS Forecast = Level + [months ahead \u00d7 Trend]\nLevel = {round(last_val, 2)}, Trend = {trend_val}"
+    elif seasonal_type is not None:
+        ets_comment_text = "ETS Forecast = Level + h \u00d7 Trend + Seasonal[h]\nSee Model Parameters for values"
+    else:
+        ets_comment_text = f"ETS Forecast = Level + [months ahead \u00d7 Trend]\nLevel = {round(last_val, 2)}"
+
+    b4_comment = Comment(ets_comment_text, "Market Pulse")
+    b4_comment.width = 350
+    b4_comment.height = 80
+    ws3.cell(row=4, column=2).comment = b4_comment
+
+    # --- Dynamic ARIMA header comment (always show d-based formula) ---
+    # Build coefficient summary for complex models
+    coeff_parts = []
+    for cname, cval in coefficients.items():
+        if cname not in ("intercept", "sigma2"):
+            coeff_parts.append(f"{cname} = {round(cval, 4)}")
+    coeff_summary = ", ".join(coeff_parts) if coeff_parts else ""
+
+    if d == 0 and p >= 1 and q >= 1:
+        arima_comment_text = (
+            f"ARIMA Forecast:\n"
+            f"Row 1: {intercept_display} + {round(ar1, 4)} \u00d7 last_value + {round(ma1, 4)} \u00d7 residual\n"
+            f"Row 2+: {intercept_display} + {round(ar1, 4)} \u00d7 previous"
+        )
+    elif d == 0 and p >= 1:
+        arima_comment_text = f"ARIMA Forecast = {intercept_display} + {round(ar1, 4)} \u00d7 previous value"
+    elif d == 1:
+        arima_comment_text = f"ARIMA Forecast (d=1) = previous + intercept of {intercept_display}"
+        if coeff_summary:
+            arima_comment_text += f"\nCoefficients: {coeff_summary}\nSee Model Parameters for full formula"
+    elif d == 2:
+        arima_comment_text = f"ARIMA Forecast (d=2) = 2 \u00d7 previous \u2212 one_before + intercept of {intercept_display}"
+        if coeff_summary:
+            arima_comment_text += f"\nCoefficients: {coeff_summary}\nSee Model Parameters for full formula"
+    else:
+        arima_comment_text = f"ARIMA({p},{d},{q}) \u2014 intercept = {intercept_display}"
+        if coeff_summary:
+            arima_comment_text += f"\nCoefficients: {coeff_summary}"
+
+    c4_comment = Comment(arima_comment_text, "Market Pulse")
+    c4_comment.width = 400
+    c4_comment.height = 100
+    ws3.cell(row=4, column=3).comment = c4_comment
+
+    # --- Build per-row instructions ---
+    def _ets_instruction(idx):
+        if trend_type is None and seasonal_type is None:
+            return f"= {round(last_val, 2)} (same for all rows)"
+        elif trend_type == "add" and seasonal_type is None:
+            trend_val = round(last_val - prev_val, 2)
+            h = idx + 1
+            result = round(last_val + h * trend_val, 2)
+            return f"= level ({round(last_val, 2)}) + {h} \u00d7 trend ({trend_val}) = {result}"
+        elif seasonal_type is not None:
+            if idx < len(ets_preds):
+                return f"= {round(ets_preds[idx], 2)} (uses seasonal pattern from Model Parameters)"
+            return "Continue seasonal pattern"
+        else:
+            return f"= {round(last_val, 2)}"
+
+    def _arima_instruction(idx):
+        if idx < len(arima_examples) and arima_examples[idx] is not None:
+            val = arima_examples[idx]
+            prev = last_val if idx == 0 else arima_examples[idx - 1]
+            if d == 0 and p >= 1:
+                if idx == 0:
+                    return f"= intercept ({intercept_display}) + ar1 ({round(ar1, 4)}) \u00d7 last ({round(last_val, 2)}) + MA term = {val}"
+                return f"= intercept ({intercept_display}) + ar1 ({round(ar1, 4)}) \u00d7 previous ({round(prev, 2)}) = {val}"
+            elif d == 1:
+                if idx == 0 and (p > 0 or q > 0):
+                    return f"= {val} (Row 1 includes AR/MA terms \u2014 verify with Model Parameters)"
+                return f"= previous ({round(prev, 2)}) + intercept ({intercept_display}) = {val}"
+            elif d == 2:
+                prev2 = prev_val if idx == 0 else (last_val if idx == 1 else arima_examples[idx - 2])
+                return f"= 2 \u00d7 previous ({round(prev, 2)}) \u2212 one_before ({round(prev2, 2)}) + intercept ({intercept_display}) = {val}"
+            else:
+                return f"= {val} (see Model Parameters for formula)"
+        if d == 1:
+            return f"= previous + {intercept_display}"
+        elif d == 2:
+            return f"= 2 \u00d7 previous \u2212 one_before + {intercept_display}"
+        return "Continue the pattern \u2014 each row uses the same formula"
 
     row = 5
     for idx, entry in enumerate(forecast_data):
@@ -268,32 +409,37 @@ def generate_manual_validation_excel(
         ws3.cell(row=row, column=1).alignment = _left_align
         ws3.cell(row=row, column=1).border = _thin_border
 
-        # ETS column: always empty yellow (full manual calc expected)
-        ets_cell = ws3.cell(row=row, column=2, value="")
-        ets_cell.fill = _yellow_fill
+        # ETS column: first 3 rows = blue worked examples, rest = yellow
+        if idx < N_WORKED and idx < len(ets_examples) and ets_examples[idx] is not None:
+            ets_cell = ws3.cell(row=row, column=2, value=ets_examples[idx])
+            ets_cell.fill = _worked_fill
+            ets_cell.font = _data_font
+        else:
+            ets_cell = ws3.cell(row=row, column=2, value="")
+            ets_cell.fill = _yellow_fill
         ets_cell.alignment = _center_align
         ets_cell.border = _thin_border
         ets_cell.number_format = _number_fmt
 
-        # ARIMA column: first row = worked example (blue), rest = empty yellow
-        if idx == 0 and arima_preds:
-            arima_cell = ws3.cell(row=row, column=3, value=arima_preds[0])
+        # ARIMA column: first 3 rows = blue worked examples, rest = yellow
+        if idx < N_WORKED and idx < len(arima_examples) and arima_examples[idx] is not None:
+            arima_cell = ws3.cell(row=row, column=3, value=arima_examples[idx])
             arima_cell.fill = _worked_fill
             arima_cell.font = _data_font
-            arima_cell.alignment = _center_align
-            arima_cell.number_format = _number_fmt
-            arima_cell.border = _thin_border
-            instruction = f"WORKED EXAMPLE: Our ARIMA predicted {arima_preds[0]}. Verify using coefficients from Sheet 2."
         else:
             arima_cell = ws3.cell(row=row, column=3, value="")
             arima_cell.fill = _yellow_fill
-            arima_cell.alignment = _center_align
-            arima_cell.border = _thin_border
-            arima_cell.number_format = _number_fmt
-            instruction = arima_instruction if idx <= 2 else "Optional — verify if needed"
+        arima_cell.alignment = _center_align
+        arima_cell.border = _thin_border
+        arima_cell.number_format = _number_fmt
 
-        # Instructions column
-        instr_cell = ws3.cell(row=row, column=4, value=ets_instruction if idx == 0 else instruction)
+        # Instructions column — dynamic per-row
+        if idx < N_WORKED:
+            instruction = f"ETS: {_ets_instruction(idx)}  |  ARIMA: {_arima_instruction(idx)}"
+        else:
+            instruction = "Continue the pattern \u2014 each row uses the same formula"
+
+        instr_cell = ws3.cell(row=row, column=4, value=instruction)
         instr_cell.font = _instruction_font
         instr_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
         instr_cell.border = _thin_border
@@ -327,20 +473,27 @@ def generate_manual_validation_excel(
 
     # ETS Headers (row 4)
     _var_header_fill = PatternFill(start_color="495057", end_color="495057", fill_type="solid")
+    _manual_header_fill = PatternFill(start_color="C3791F", end_color="C3791F", fill_type="solid")
+    _model_header_fill = PatternFill(start_color="248479", end_color="248479", fill_type="solid")
+    _white_header_font = Font(name="Calibri", bold=True, size=10, color="FFFFFF")
+
+    # ETS: col1=Date(default), col2=Manual(orange), col3=Model(teal), col4-5=Variance(gray)
     ets_headers = ["Date", "Manual ETS (Calculated)", "Model ETS (Predicted)", "Variance (ETS)", "Variance % (ETS)"]
+    ets_fills = {1: _header_fill, 2: _manual_header_fill, 3: _model_header_fill, 4: _var_header_fill, 5: _var_header_fill}
     for col_idx, hdr in enumerate(ets_headers, 1):
         cell = ws4.cell(row=4, column=col_idx, value=hdr)
-        cell.font = _header_font
-        cell.fill = _var_header_fill if col_idx in (4, 5) else _header_fill
+        cell.font = _white_header_font
+        cell.fill = ets_fills[col_idx]
         cell.alignment = _left_align if col_idx == 1 else _header_align
         cell.border = _thin_border
 
-    # ARIMA Headers (row 4, cols G-K)
+    # ARIMA: col7=Date(default), col8=Manual(orange), col9=Model(teal), col10-11=Variance(gray)
     arima_headers = ["Date", "Manual ARIMA (Calculated)", "Model ARIMA (Predicted)", "Variance (ARIMA)", "Variance % (ARIMA)"]
-    for col_idx, hdr in enumerate(arima_headers, 7):  # start at col 7 (G)
+    arima_fills = {7: _header_fill, 8: _manual_header_fill, 9: _model_header_fill, 10: _var_header_fill, 11: _var_header_fill}
+    for col_idx, hdr in enumerate(arima_headers, 7):
         cell = ws4.cell(row=4, column=col_idx, value=hdr)
-        cell.font = _header_font
-        cell.fill = _var_header_fill if col_idx in (10, 11) else _header_fill
+        cell.font = _white_header_font
+        cell.fill = arima_fills[col_idx]
         cell.alignment = _left_align if col_idx == 7 else _header_align
         cell.border = _thin_border
 
@@ -507,19 +660,41 @@ def generate_manual_validation_excel(
     mae_arima_cell.alignment = _center_align
     mae_arima_cell.border = _thin_border
 
-    # Conditional formatting for MAE values — matches Agreement Score style
-    # Green (D1FAE5/065F46) if MAE ≈ 0, Red (FFC7CE/9C0006) if MAE > 0
+    # Dynamic 3-tier MAE color coding: normalize by avg forecast magnitude
+    # MAE % = MAE / avg(|predictions|) × 100
+    # Green ≤ 1%, Yellow 1-5%, Red > 5%
     _mae_green_font = Font(name="Calibri", bold=True, size=12, color="065F46")
+    _mae_yellow_font = Font(name="Calibri", bold=True, size=12, color="92400E")
     _mae_red_font = Font(name="Calibri", bold=True, size=12, color="9C0006")
-    for mae_col in [f"B{row}", f"H{row}"]:
-        ws4.conditional_formatting.add(mae_col, CellIsRule(
-            operator="lessThanOrEqual", formula=["0.01"],
-            fill=_cf_green_fill, font=_mae_green_font,
-        ))
-        ws4.conditional_formatting.add(mae_col, CellIsRule(
-            operator="greaterThan", formula=["0.01"],
-            fill=_cf_red_fill, font=_mae_red_font,
-        ))
+    _cf_yellow_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
+
+    avg_ets = round(sum(abs(v) for v in ets_preds if v) / max(len(ets_preds), 1), 6)
+    avg_arima = round(sum(abs(v) for v in arima_preds if v) / max(len(arima_preds), 1), 6)
+
+    for mae_col, avg_val in [(f"B{row}", avg_ets), (f"H{row}", avg_arima)]:
+        if avg_val > 0:
+            # Green: MAE % ≤ 1%  →  MAE ≤ avg * 0.01
+            t1 = round(avg_val * 0.01, 6)
+            # Yellow: MAE % ≤ 5%  →  MAE ≤ avg * 0.05
+            t5 = round(avg_val * 0.05, 6)
+            ws4.conditional_formatting.add(mae_col, CellIsRule(
+                operator="lessThanOrEqual", formula=[str(t1)],
+                fill=_cf_green_fill, font=_mae_green_font,
+            ))
+            ws4.conditional_formatting.add(mae_col, FormulaRule(
+                formula=[f"AND({mae_col}>{t1},{mae_col}<={t5})"],
+                fill=_cf_yellow_fill, font=_mae_yellow_font,
+            ))
+            ws4.conditional_formatting.add(mae_col, CellIsRule(
+                operator="greaterThan", formula=[str(t5)],
+                fill=_cf_red_fill, font=_mae_red_font,
+            ))
+        else:
+            # All predictions are 0 — any MAE is green
+            ws4.conditional_formatting.add(mae_col, CellIsRule(
+                operator="greaterThanOrEqual", formula=["0"],
+                fill=_cf_green_fill, font=_mae_green_font,
+            ))
 
     # Column widths
     ws4.column_dimensions["A"].width = 17  # Date

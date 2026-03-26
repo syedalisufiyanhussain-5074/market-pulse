@@ -772,3 +772,176 @@ async def export_validation(http_request: Request, request: ValidationExportRequ
     except Exception as e:
         logger.error(f"Validation export failed: {e}")
         raise HTTPException(status_code=500, detail={"message": "Failed to generate validation reports.", "error_code": "EXPORT_ERROR"})
+
+
+# ---------------------------------------------------------------------------
+# Streaming validation export (SSE progress + two-phase ZIP download)
+# ---------------------------------------------------------------------------
+
+@router.post("/export/validation/stream")
+async def export_validation_stream(http_request: Request, request: ValidationExportRequest):
+    """Stream progress for IV + MV validation report generation."""
+    import zipfile
+    import uuid
+    import numpy as np
+    from app.services.independent_validation import (
+        run_independent_models, compute_variance, compute_agreement_score,
+        compute_independent_metrics, compute_python_metrics,
+    )
+    from app.services.independent_validation_export import generate_independent_validation_excel
+    from app.services.manual_validation_export import generate_manual_validation_excel
+
+    session_id = getattr(http_request.state, "session_id", None)
+
+    def generate():
+        t0 = time.perf_counter()
+        try:
+            yield _sse("progress", progress=10, message="Preparing validation data...")
+
+            y = np.array([e["value"] for e in request.historical_data], dtype=float)
+            forecast_horizon = len(request.forecast_data)
+            sp = FREQ_SP_MAP.get(request.frequency)
+            py_forecasts = request.comparison_forecasts
+
+            # --- Independent Validation ---
+            iv_bytes = None
+            iv_error = None
+            agreement_notes = ""
+
+            try:
+                use_cache = bool(request.file_hash)
+                iv_cache_key = f"iv_{request.file_hash}_{request.frequency}_{sp}_{forecast_horizon}" if use_cache else ""
+                cached = file_cache.get_iv(iv_cache_key) if use_cache else None
+
+                if cached:
+                    yield _sse("progress", progress=30, message="Loading cached validation models...")
+                    ind_forecasts = cached["ind_forecasts"]
+                    status_overrides = cached["status_overrides"]
+                    variance_data = cached["var_data"]
+                    ind_metrics = cached["ind_metrics"]
+                    py_metrics = cached["py_metrics"]
+                    score_result = cached["agreement_score"]
+                    yield _sse("progress", progress=65, message="Computing variance analysis...")
+                else:
+                    yield _sse("progress", progress=30, message="Running independent validation models...")
+                    ind_result = None
+                    for item in _run_with_heartbeats(lambda: run_independent_models(y, sp, forecast_horizon)):
+                        if isinstance(item, str):
+                            yield item  # heartbeat
+                        else:
+                            ind_result = item
+
+                    ind_forecasts, status_overrides = ind_result
+                    yield _sse("progress", progress=65, message="Computing variance analysis...")
+                    variance_data = compute_variance(ind_forecasts, py_forecasts, status_overrides)
+
+                    observation_count = len(y)
+                    was_downsampled = False
+                    if len(request.historical_data) >= 2:
+                        from datetime import datetime as _dt
+                        d0 = _dt.fromisoformat(request.historical_data[0]["date"])
+                        d1 = _dt.fromisoformat(request.historical_data[1]["date"])
+                        _freq_days = {"D": 1, "W": 7, "MS": 30, "QS": 91, "YS": 365}
+                        was_downsampled = (d1 - d0).days > _freq_days.get(request.frequency, 999) * 2
+
+                    score_result = compute_agreement_score(
+                        variance_data, observation_count=observation_count, was_downsampled=was_downsampled,
+                    )
+                    ind_metrics = compute_independent_metrics(y, forecast_horizon, ind_forecasts)
+                    py_metrics = compute_python_metrics(y, forecast_horizon, py_forecasts)
+
+                    if use_cache:
+                        file_cache.put_iv(iv_cache_key, {
+                            "ind_forecasts": ind_forecasts, "status_overrides": status_overrides,
+                            "var_data": variance_data, "ind_metrics": ind_metrics,
+                            "py_metrics": py_metrics, "agreement_score": score_result,
+                        })
+
+                yield _sse("progress", progress=75, message="Generating Independent Validation report...")
+                iv_result = None
+                for item in _run_with_heartbeats(lambda: generate_independent_validation_excel(
+                    request.historical_data, request.forecast_data,
+                    ind_forecasts, py_forecasts, variance_data,
+                    ind_metrics, py_metrics, score_result["score"],
+                    request.frequency, request.selected_model, score_result.get("warnings", []),
+                )):
+                    if isinstance(item, str):
+                        yield item
+                    else:
+                        iv_result = item
+                iv_bytes = iv_result
+                agreement_notes = f"agreement_score={score_result['score']}"
+
+            except Exception as e:
+                iv_error = str(e)
+                logger.error(f"IV generation failed in stream: {e}")
+
+            # --- Manual Validation ---
+            yield _sse("progress", progress=85, message="Generating Manual Validation report...")
+            mv_bytes = None
+            for item in _run_with_heartbeats(lambda: generate_manual_validation_excel(
+                request.historical_data, request.forecast_data,
+                request.comparison_forecasts, request.frequency, request.model_params,
+            )):
+                if isinstance(item, str):
+                    yield item
+                else:
+                    mv_bytes = item
+
+            # --- ZIP ---
+            yield _sse("progress", progress=95, message="Packaging reports...")
+            date_str = datetime.now().strftime("%d%m%Y")
+            base = f"MarketPulse_{date_str}_V{APP_VERSION}"
+            buf = io.BytesIO()
+            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+                if iv_bytes:
+                    zf.writestr("Independent_Validation_Report.xlsx", iv_bytes)
+                else:
+                    zf.writestr(
+                        "Independent_Validation_ERROR.txt",
+                        f"Independent Validation report could not be generated.\nError: {iv_error}\n\nPlease try again or contact support.",
+                    )
+                zf.writestr("Manual_Validation_Report.xlsx", mv_bytes)
+            zip_bytes = buf.getvalue()
+
+            cache_key = str(uuid.uuid4())
+            file_cache.put_zip(cache_key, zip_bytes)
+
+            filename = f"{base}_ValidationReports.zip"
+            yield _sse("progress", progress=100, message="Reports ready!")
+            yield _sse("complete", cache_key=cache_key, filename=filename)
+
+            audit_log(
+                event_type="report_download_validation_stream",
+                component="forecast_router",
+                session_id=session_id,
+                report_type="validation_zip",
+                notes=agreement_notes or f"iv_failed={iv_error}",
+                duration_ms=round((time.perf_counter() - t0) * 1000, 1),
+            )
+
+        except Exception as e:
+            logger.error(f"Validation stream failed: {e}")
+            yield _sse("error", message=str(e), error_code="VALIDATION_STREAM_ERROR")
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/export/validation/download/{cache_key}")
+async def download_validation_zip(cache_key: str):
+    """Download a previously generated validation ZIP by cache key."""
+    zip_bytes = file_cache.get_zip(cache_key)
+    if not zip_bytes:
+        raise HTTPException(
+            status_code=404,
+            detail={"message": "Report expired or not found. Please generate again.", "error_code": "CACHE_MISS"},
+        )
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=ValidationReports.zip"},
+    )

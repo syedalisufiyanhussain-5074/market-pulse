@@ -9,6 +9,7 @@ from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image as XlImage
+from openpyxl.comments import Comment
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -409,17 +410,28 @@ def generate_independent_validation_excel(
     label_cell.fill = _fill_base
     label_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
     label_cell.border = _border
+    label_cell.comment = Comment(
+        "Agreement Score = 100 \u2212 avg(Variance %)\n95%\u2013100%: Strong\n85%\u201395%: Moderate\n< 85%: Weak",
+        "Market Pulse",
+        width=250,
+        height=100,
+    )
 
+    _yellow_score_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
     if agreement_score is None:
         # Not Comparable — frequency mismatch
-        _yellow_score_fill = PatternFill(start_color="FEF3C7", end_color="FEF3C7", fill_type="solid")
         score_cell = ws2.cell(row=row, column=2, value="Not Comparable")
         score_cell.font = Font(name="Calibri", bold=True, size=12, color="92400E")
         score_cell.fill = _yellow_score_fill
-    elif agreement_score >= 90:
+    elif agreement_score >= 95:
         score_cell = ws2.cell(row=row, column=2, value=agreement_score)
         score_cell.font = Font(name="Calibri", bold=True, size=12, color="065F46")
         score_cell.fill = _green_fill
+        score_cell.number_format = "0.00"
+    elif agreement_score >= 85:
+        score_cell = ws2.cell(row=row, column=2, value=agreement_score)
+        score_cell.font = Font(name="Calibri", bold=True, size=12, color="92400E")
+        score_cell.fill = _yellow_score_fill
         score_cell.number_format = "0.00"
     else:
         score_cell = ws2.cell(row=row, column=2, value=agreement_score)

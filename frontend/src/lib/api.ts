@@ -351,6 +351,107 @@ export async function exportManualValidation(data: ForecastResponse): Promise<Bl
   return res.blob();
 }
 
+export async function runValidationStream(
+  data: ForecastResponse,
+  onProgress: (progress: number, message: string) => void,
+): Promise<Blob> {
+  const controller = new AbortController();
+  const connectTimeout = setTimeout(() => controller.abort(), 180_000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}/api/export/validation/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Session-ID": getSessionId() },
+      body: JSON.stringify({
+        historical_data: data.historical_data,
+        forecast_data: data.forecast_data,
+        comparison_forecasts: data.comparison_forecasts ?? {},
+        frequency: data.frequency,
+        metrics: data.metrics,
+        selected_model: data.selected_model,
+        model_params: data.model_params ?? {},
+        file_hash: data.file_hash ?? "",
+        forecast_bias: data.forecast_bias ?? "Forecast",
+      }),
+      signal: controller.signal,
+    });
+  } catch (err: unknown) {
+    clearTimeout(connectTimeout);
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new AppError("Request timed out. Please try again.");
+    }
+    throw new AppError("Unable to reach the server. Please check your connection and try again.");
+  }
+  clearTimeout(connectTimeout);
+
+  if (!res.body) {
+    throw new AppError("Your browser doesn't support live updates.", "STREAM_ERROR");
+  }
+
+  const IDLE_MS = 45_000;
+  let idleTimer = setTimeout(() => controller.abort(), IDLE_MS);
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  try {
+    while (true) {
+      let readResult: ReadableStreamReadResult<Uint8Array>;
+      try {
+        readResult = await reader.read();
+      } catch (err: unknown) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          throw new AppError("The server took too long. Please try again.");
+        }
+        throw new AppError("Connection interrupted. Please try again.");
+      }
+
+      const { done, value } = readResult;
+      if (done) break;
+
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => controller.abort(), IDLE_MS);
+
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";
+
+      for (const raw of parts) {
+        const eventMatch = raw.match(/^event: (.+)$/m);
+        const dataMatch = raw.match(/^data: (.+)$/m);
+        if (!eventMatch || !dataMatch) continue;
+
+        const type = eventMatch[1];
+        if (type === "heartbeat") continue;
+
+        const eventData = JSON.parse(dataMatch[1]);
+
+        if (type === "progress") {
+          onProgress(eventData.progress, eventData.message);
+        } else if (type === "complete") {
+          clearTimeout(idleTimer);
+          const downloadRes = await fetch(
+            `${API_BASE}/api/export/validation/download/${eventData.cache_key}`,
+            { headers: { "X-Session-ID": getSessionId() } },
+          );
+          if (!downloadRes.ok) {
+            throw new AppError("Failed to download reports. Please try again.");
+          }
+          return downloadRes.blob();
+        } else if (type === "error") {
+          clearTimeout(idleTimer);
+          throw new AppError(eventData.message || "Validation failed", eventData.error_code);
+        }
+      }
+    }
+  } finally {
+    clearTimeout(idleTimer);
+  }
+
+  throw new AppError("No results received. Please try again.", "STREAM_ERROR");
+}
+
 export async function exportValidation(data: ForecastResponse): Promise<Blob> {
   const res = await fetch(`${API_BASE}/api/export/validation`, {
     method: "POST",
